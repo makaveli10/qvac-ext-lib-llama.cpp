@@ -267,7 +267,7 @@ if (LLAMA_BUILD_COMMON)
       EXPORT llama-targets)
 
   install(
-    TARGETS common build_info
+    TARGETS llama-common llama-common-base
     EXPORT llama-targets
     PUBLIC_HEADER
       DESTINATION ${LLAMA_INCLUDE_INSTALL_DIR}/common)
