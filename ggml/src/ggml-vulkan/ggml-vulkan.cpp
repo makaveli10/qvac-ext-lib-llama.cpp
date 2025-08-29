@@ -3953,6 +3953,12 @@ static vk_device ggml_vk_get_device(size_t idx) {
             GGML_LOG_WARN("Vulkan device does not support storageBuffer8BitAccess.\n");
         }
 
+        constexpr uint32_t k_recommended_storage_buffer_range = 0x10000000;
+        if (device->properties.limits.maxStorageBufferRange < k_recommended_storage_buffer_range) {
+            GGML_LOG_WARN("Vulkan device maxStorageBufferRange %d is smaller than the required %d.\n",
+                          device->properties.limits.maxStorageBufferRange, k_recommended_storage_buffer_range);
+        }
+
         device->fp16 = device->fp16 && vk12_features.shaderFloat16;
 
 #if defined(VK_KHR_shader_bfloat16)
