@@ -2060,7 +2060,7 @@ static void ggml_vk_destroy_buffer(vk_buffer& buf) {
 }
 
 static vk_subbuffer ggml_vk_subbuffer(vk_buffer& buf) {
-    return { buf, 0, VK_WHOLE_SIZE };
+    return { buf, 0, buf->size };
 }
 
 static void ggml_vk_sync_buffers(ggml_backend_vk_context* ctx, vk_context& subctx) {
@@ -6530,7 +6530,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     }
 
     if (x_non_contig) {
-        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, VK_WHOLE_SIZE }, { d_X, 0, VK_WHOLE_SIZE });
+        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, d_Qx->size - qx_buf_offset }, { d_X, 0, d_X->size });
     } else if (qx_needs_dequant) {
         const std::vector<uint32_t> pc = { (uint32_t)ne01, (uint32_t)ne10, (uint32_t)ne10, (uint32_t)ne10, (uint32_t)(ggml_nelements(src0)) };
         ggml_vk_dispatch_pipeline(ctx, subctx, to_fp16_vk_0, { vk_subbuffer{ d_Qx, qx_buf_offset, qx_sz * ne02 * ne03 }, vk_subbuffer{ d_X, 0, x_sz * ne02 * ne03 } }, pc, { (uint32_t)(x_ne * ne02 * ne03), 1, 1});
@@ -6542,7 +6542,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
             if (ctx->prealloc_y_need_sync) {
                 ggml_vk_sync_buffers(ctx, subctx);
             }
-            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, VK_WHOLE_SIZE }, { d_Y, 0, VK_WHOLE_SIZE });
+            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, d_Qy->size - qy_buf_offset }, { d_Y, 0, d_Y->size });
             ctx->prealloc_y_last_pipeline_used = to_fp16_vk_1.get();
             ctx->prealloc_y_last_tensor_used = src1;
         }
@@ -6553,7 +6553,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
             if (ctx->prealloc_y_need_sync) {
                 ggml_vk_sync_buffers(ctx, subctx);
             }
-            ggml_vk_quantize_q8_1(ctx, subctx, { d_Qy, qy_buf_offset, VK_WHOLE_SIZE }, { d_Y, 0, VK_WHOLE_SIZE }, y_ne * ne12 * ne13, true);
+            ggml_vk_quantize_q8_1(ctx, subctx, { d_Qy, qy_buf_offset, d_Qy->size - qy_buf_offset }, { d_Y, 0, d_Y->size }, y_ne * ne12 * ne13, true);
             ctx->prealloc_y_last_pipeline_used = to_q8_1.get();
             ctx->prealloc_y_last_tensor_used = src1;
         }
@@ -6827,7 +6827,7 @@ static void ggml_vk_mul_mat_vec_q_f16(ggml_backend_vk_context * ctx, vk_context&
         }
 
         GGML_ASSERT(x_sz == ggml_vk_align_size(ggml_type_size(src0->type) * x_ne, ctx->device->properties.limits.minStorageBufferOffsetAlignment));
-        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, VK_WHOLE_SIZE }, { d_X, 0, VK_WHOLE_SIZE });
+        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, d_Qx->size - qx_buf_offset }, { d_X, 0, d_X->size });
     }
     if (y_non_contig) {
         GGML_ASSERT(y_sz == ggml_type_size(src1->type) * y_ne);
@@ -6836,7 +6836,7 @@ static void ggml_vk_mul_mat_vec_q_f16(ggml_backend_vk_context * ctx, vk_context&
             if (ctx->prealloc_y_need_sync) {
                 ggml_vk_sync_buffers(ctx, subctx);
             }
-            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, VK_WHOLE_SIZE }, { d_Y, 0, VK_WHOLE_SIZE });
+            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, d_Qy->size - qy_buf_offset }, { d_Y, 0, d_Y->size });
             ctx->prealloc_y_last_pipeline_used = to_fp16_vk_1.get();
             ctx->prealloc_y_last_tensor_used = src1;
         }
@@ -6847,7 +6847,7 @@ static void ggml_vk_mul_mat_vec_q_f16(ggml_backend_vk_context * ctx, vk_context&
             if (ctx->prealloc_y_need_sync) {
                 ggml_vk_sync_buffers(ctx, subctx);
             }
-            ggml_vk_quantize_q8_1(ctx, subctx, { d_Qy, qy_buf_offset, VK_WHOLE_SIZE }, { d_Y, 0, VK_WHOLE_SIZE }, y_ne * ne12 * ne13, true);
+            ggml_vk_quantize_q8_1(ctx, subctx, { d_Qy, qy_buf_offset, d_Qy->size - qy_buf_offset }, { d_Y, 0, d_Y->size }, y_ne * ne12 * ne13, true);
             ctx->prealloc_y_last_pipeline_used = to_q8_1.get();
             ctx->prealloc_y_last_tensor_used = src1;
         }
@@ -7287,7 +7287,7 @@ static void ggml_vk_mul_mat_id_q_f16(ggml_backend_vk_context * ctx, vk_context& 
     }
 
     if (x_non_contig) {
-        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, VK_WHOLE_SIZE }, { d_X, 0, VK_WHOLE_SIZE });
+        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, d_Qx->size - qx_buf_offset }, { d_X, 0, d_X->size });
     } else if (qx_needs_dequant) {
         const std::vector<uint32_t> pc = { (uint32_t)ne01, (uint32_t)ne10, (uint32_t)ne10, (uint32_t)ne10, (uint32_t)(ggml_nelements(src0)) };
         ggml_vk_dispatch_pipeline(ctx, subctx, to_fp16_vk_0,
@@ -7300,7 +7300,7 @@ static void ggml_vk_mul_mat_id_q_f16(ggml_backend_vk_context * ctx, vk_context& 
             if (ctx->prealloc_y_need_sync) {
                 ggml_vk_sync_buffers(ctx, subctx);
             }
-            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, VK_WHOLE_SIZE }, { d_Y, 0, VK_WHOLE_SIZE });
+            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, d_Qy->size - qy_buf_offset }, { d_Y, 0, d_Y->size });
             ctx->prealloc_y_last_pipeline_used = to_fp16_vk_1.get();
             ctx->prealloc_y_last_tensor_used = src1;
         }
@@ -7500,7 +7500,7 @@ static void ggml_vk_mul_mat_vec_id_q_f16(ggml_backend_vk_context * ctx, vk_conte
 
     if (x_non_contig) {
         GGML_ASSERT(x_sz == ggml_vk_align_size(ggml_type_size(src0->type) * x_ne, ctx->device->properties.limits.minStorageBufferOffsetAlignment));
-        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, VK_WHOLE_SIZE }, { d_X, 0, VK_WHOLE_SIZE });
+        ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_0, src0, { d_Qx, qx_buf_offset, d_Qx->size - qx_buf_offset }, { d_X, 0, d_X->size });
     }
     if (y_non_contig) {
         GGML_ASSERT(y_sz == ggml_type_size(src1->type) * y_ne);
@@ -7509,7 +7509,7 @@ static void ggml_vk_mul_mat_vec_id_q_f16(ggml_backend_vk_context * ctx, vk_conte
             if (ctx->prealloc_y_need_sync) {
                 ggml_vk_sync_buffers(ctx, subctx);
             }
-            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, VK_WHOLE_SIZE }, { d_Y, 0, VK_WHOLE_SIZE });
+            ggml_vk_cpy_to_contiguous(ctx, subctx, to_fp16_vk_1, src1, { d_Qy, qy_buf_offset, d_Qy->size - qy_buf_offset }, { d_Y, 0, d_Y->size });
             ctx->prealloc_y_last_pipeline_used = to_fp16_vk_1.get();
             ctx->prealloc_y_last_tensor_used = src1;
         }
@@ -7908,12 +7908,12 @@ static void ggml_vk_flash_attn(ggml_backend_vk_context * ctx, vk_context& subctx
 
         ggml_vk_dispatch_pipeline(ctx, subctx, pipeline,
                                     {
-                                        vk_subbuffer{d_Q, q_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_K, k_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_V, v_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_M, m_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_S, s_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{ctx->prealloc_split_k, 0, VK_WHOLE_SIZE},
+                                        vk_subbuffer{d_Q, q_buf_offset, d_Q->size - q_buf_offset},
+                                        vk_subbuffer{d_K, k_buf_offset, d_K->size - k_buf_offset},
+                                        vk_subbuffer{d_V, v_buf_offset, d_V->size - v_buf_offset},
+                                        vk_subbuffer{d_M, m_buf_offset, d_M->size - m_buf_offset},
+                                        vk_subbuffer{d_S, s_buf_offset, d_S->size - s_buf_offset},
+                                        vk_subbuffer{ctx->prealloc_split_k, 0, ctx->prealloc_split_k->size},
                                     },
                                     // We only use split_k when group query attention is enabled, which means
                                     // there's no more than one tile of rows (i.e. workgroups_x would have been
@@ -7925,21 +7925,21 @@ static void ggml_vk_flash_attn(ggml_backend_vk_context * ctx, vk_context& subctx
         const std::array<uint32_t, 5> pc2 = { HSV, (uint32_t)ne1, (uint32_t)ne3, split_k, (sinks != nullptr) };
         ggml_vk_dispatch_pipeline(ctx, subctx, ctx->device->pipeline_flash_attn_split_k_reduce,
                                     {
-                                        vk_subbuffer{ctx->prealloc_split_k, 0, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_S, s_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_D, d_buf_offset, VK_WHOLE_SIZE},
+                                        vk_subbuffer{ctx->prealloc_split_k, 0, ctx->prealloc_split_k->size},
+                                        vk_subbuffer{d_S, s_buf_offset, d_S->size - s_buf_offset},
+                                        vk_subbuffer{d_D, d_buf_offset, d_D->size - d_buf_offset},
                                     },
                                     pc2, { (uint32_t)ne1, HSV, (uint32_t)ne3 });
         ctx->prealloc_split_k_need_sync = true;
     } else {
         ggml_vk_dispatch_pipeline(ctx, subctx, pipeline,
                                     {
-                                        vk_subbuffer{d_Q, q_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_K, k_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_V, v_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_M, m_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_S, s_buf_offset, VK_WHOLE_SIZE},
-                                        vk_subbuffer{d_D, d_buf_offset, VK_WHOLE_SIZE},
+                                        vk_subbuffer{d_Q, q_buf_offset, d_Q->size - q_buf_offset},
+                                        vk_subbuffer{d_K, k_buf_offset, d_K->size - k_buf_offset},
+                                        vk_subbuffer{d_V, v_buf_offset, d_V->size - v_buf_offset},
+                                        vk_subbuffer{d_M, m_buf_offset, d_M->size - m_buf_offset},
+                                        vk_subbuffer{d_S, s_buf_offset, d_S->size - s_buf_offset},
+                                        vk_subbuffer{d_D, d_buf_offset, d_D->size - d_buf_offset},
                                     },
                                     pc, { workgroups_x, workgroups_y, workgroups_z });
     }
@@ -8674,16 +8674,16 @@ static void ggml_vk_op_f32(ggml_backend_vk_context * ctx, vk_context& subctx, co
         d_sz = ggml_nbytes(dst) + get_misalign_bytes(ctx, dst);
 
         if (x_buf_offset + x_sz >= d_X->size) {
-            x_sz = VK_WHOLE_SIZE;
+            x_sz = d_X->size - x_buf_offset;
         }
         if (use_src1 && y_buf_offset + y_sz >= d_Y->size) {
-            y_sz = VK_WHOLE_SIZE;
+            y_sz = d_Y->size - y_buf_offset;
         }
         if (use_src2 && z_buf_offset + z_sz >= d_Z->size) {
-            z_sz = VK_WHOLE_SIZE;
+            z_sz = d_Z->size - z_buf_offset;
         }
         if (d_buf_offset + d_sz >= d_D->size) {
-            d_sz = VK_WHOLE_SIZE;
+            d_sz = d_D->size - d_buf_offset;
         }
     }
 
@@ -8930,7 +8930,7 @@ static void ggml_vk_op_f32(ggml_backend_vk_context * ctx, vk_context& subctx, co
             { vk_subbuffer{ d_X, x_buf_offset, x_sz },
               vk_subbuffer{ d_Y, y_buf_offset, y_sz },
               vk_subbuffer{ d_D, d_buf_offset, d_sz },
-              vk_subbuffer{ d_A, a_buf_offset, VK_WHOLE_SIZE },
+              vk_subbuffer{ d_A, a_buf_offset, d_A->size - a_buf_offset },
             }, pc, elements);
     } else if (op == GGML_OP_GLU) {
         // Empty src1 is possible in glu, but the shader needs a buffer
@@ -9119,18 +9119,18 @@ static void ggml_vk_multi_add(ggml_backend_vk_context * ctx, vk_context& subctx,
     static_assert(MAX_PARAMETER_COUNT == 12);
     ggml_vk_dispatch_pipeline(ctx, subctx, pipeline,
         {
-            vk_subbuffer{ buf[0], offset[0], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[1], offset[1], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[2], offset[2], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[3], offset[3], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[4], offset[4], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[5], offset[5], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[6], offset[6], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[7], offset[7], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[8], offset[8], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[9], offset[9], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[10], offset[10], VK_WHOLE_SIZE },
-            vk_subbuffer{ buf[11], offset[11], VK_WHOLE_SIZE },
+            vk_subbuffer{ buf[0], offset[0], buf[0]->size - offset[0] },
+            vk_subbuffer{ buf[1], offset[1], buf[1]->size - offset[1] },
+            vk_subbuffer{ buf[2], offset[2], buf[2]->size - offset[2] },
+            vk_subbuffer{ buf[3], offset[3], buf[3]->size - offset[3] },
+            vk_subbuffer{ buf[4], offset[4], buf[4]->size - offset[4] },
+            vk_subbuffer{ buf[5], offset[5], buf[5]->size - offset[5] },
+            vk_subbuffer{ buf[6], offset[6], buf[6]->size - offset[6] },
+            vk_subbuffer{ buf[7], offset[7], buf[7]->size - offset[7] },
+            vk_subbuffer{ buf[8], offset[8], buf[8]->size - offset[8] },
+            vk_subbuffer{ buf[9], offset[9], buf[9]->size - offset[9] },
+            vk_subbuffer{ buf[10], offset[10], buf[10]->size - offset[10] },
+            vk_subbuffer{ buf[11], offset[11], buf[11]->size - offset[11] },
         }, pc, elements);
 }
 
