@@ -4198,6 +4198,17 @@ static vk_device ggml_vk_get_device(size_t idx) {
             device_extensions
         };
         device_create_info.setPNext(&device_features2);
+
+        // Disable descriptorBinding*UpdateAfterBind when robustBufferAccessUpdateAfterBind is not available.
+        // Fixes VUID-VkDeviceCreateInfo-robustBufferAccess-10247
+        if (device_features.robustBufferAccess == VK_TRUE &&
+            vk12_props.robustBufferAccessUpdateAfterBind == VK_FALSE) {
+            vk12_features.descriptorBindingUniformBufferUpdateAfterBind = VK_FALSE;
+            vk12_features.descriptorBindingStorageBufferUpdateAfterBind = VK_FALSE;
+            vk12_features.descriptorBindingUniformTexelBufferUpdateAfterBind = VK_FALSE;
+            vk12_features.descriptorBindingStorageTexelBufferUpdateAfterBind = VK_FALSE;
+        }
+
         device->device = device->physical_device.createDevice(device_create_info);
 
         // Queues
