@@ -92,6 +92,14 @@ if (Vulkan_FOUND)
     target_include_directories(ggml-vulkan PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
     target_include_directories(ggml-vulkan PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_cpp_wrapper/include")
 
+    if (ANDROID)
+        set(VULKAN_INCLUDE_DIR_VENDOR "${CMAKE_SOURCE_DIR}/vendor/Vulkan-Headers/include/")
+        if(NOT EXISTS "${VULKAN_INCLUDE_DIR_VENDOR}")
+            message(FATAL_ERROR "The directory '${VULKAN_INCLUDE_DIR_VENDOR}' does not exist. Run `git submodule update --init`.")
+        endif()
+        target_include_directories(ggml-vulkan PRIVATE ${VULKAN_INCLUDE_DIR_VENDOR})
+    endif()
+
     # Workaround to the "can't dereference invalidated vector iterator" bug in clang-cl debug build
     # Posssibly relevant: https://stackoverflow.com/questions/74748276/visual-studio-no-displays-the-correct-length-of-stdvector
     if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
