@@ -5,6 +5,18 @@
 #include "ggml-cpu.h"
 #endif
 
+#if defined(ANDROID)
+// Android apparently does not provide a vkResetQueryPool symbol in it's Vulkan lib,
+// which breaks  the Khronos headers when using vulkan.hpp.
+// HACK: Let's define the symbol ourselves then.
+// Fixes https://github.com/ggml-org/llama.cpp/issues/15698
+VKAPI_ATTR void VKAPI_CALL vkResetQueryPool(
+        VkDevice                                    device,
+        VkQueryPool                                 queryPool,
+        uint32_t                                    firstQuery,
+        uint32_t                                    queryCount) {}
+#endif
+
 #include <vulkan/vulkan.hpp>
 
 #include <algorithm>
