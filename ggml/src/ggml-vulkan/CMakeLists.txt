@@ -93,7 +93,7 @@ if (Vulkan_FOUND)
     target_include_directories(ggml-vulkan PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_cpp_wrapper/include")
 
     if (ANDROID)
-        set(VULKAN_INCLUDE_DIR_VENDOR "${CMAKE_SOURCE_DIR}/vendor/Vulkan-Headers/include/")
+        set(VULKAN_INCLUDE_DIR_VENDOR "${CMAKE_CURRENT_SOURCE_DIR}/../../../vendor/Vulkan-Headers/include/")
         if(NOT EXISTS "${VULKAN_INCLUDE_DIR_VENDOR}")
             message(FATAL_ERROR "The directory '${VULKAN_INCLUDE_DIR_VENDOR}' does not exist. Run `git submodule update --init`.")
         endif()
