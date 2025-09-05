@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
         android:allowBackup="false"
@@ -12,13 +11,30 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Llamacpp">
         <activity
-            android:name="android.app.NativeActivity"
+            android:name=".NativeCliActivity"
+            android:label="llama-cli"
             android:exported="true">
-
-            <!-- Tell NativeActivity the name of our .so -->
-            <meta-data android:name="android.app.lib_name"
-                android:value="native-activity" />
-
+            <meta-data android:name="android.app.lib_name" android:value="llama-cli" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".NativeLoraFineTuningActivity"
+            android:label="llama-finetune-lora"
+            android:exported="true">
+            <meta-data android:name="android.app.lib_name" android:value="llama-finetune-lora" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".NativeTestBackendOpsActivity"
+            android:label="test-backend-ops"
+            android:exported="true">
+            <meta-data android:name="android.app.lib_name" android:value="test-backend-ops" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -32,5 +48,4 @@
             </intent-filter>
         </activity>
     </application>
-
 </manifest>
