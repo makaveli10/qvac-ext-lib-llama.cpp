@@ -40,6 +40,10 @@
 #include <thread>
 #include <vector>
 
+#if defined(ANDROID)
+#include <android_native_app_glue.h>
+#endif
+
 static void init_tensor_uniform(ggml_tensor * tensor, float min = -1.0f, float max = 1.0f) {
     size_t nels = ggml_nelements(tensor);
     std::vector<float> data(nels);
@@ -6945,7 +6949,7 @@ static int run(test_mode mode,
                                                              false, "", ggml_backend_dev_description(dev),
                                                              total / 1024 / 1024, free / 1024 / 1024, true));
 
-        bool ok = test_backend(backend, mode, op_names_filter, params_filter, output_printer.get());
+        bool ok = test_backend(backend, mode, op_name_filter, params_filter, output_printer.get());
 
         if (ok) {
             n_ok++;
@@ -6972,6 +6976,18 @@ static int run(test_mode mode,
     return 0;
 }
 
+#if defined(ANDROID)
+void android_main(android_app* state) {
+    (void) state;
+    test_mode mode = MODE_TEST;
+    output_formats output_format = CONSOLE;
+    const char * op_name_filter = nullptr;
+    const char * backend_filter = nullptr;
+    const char * params_filter = nullptr;
+
+    run(mode, output_format, op_name_filter, backend_filter, params_filter);
+}
+#else
 int main(int argc, char ** argv) {
     test_mode mode = MODE_TEST;
     output_formats output_format = CONSOLE;
@@ -7033,3 +7049,4 @@ int main(int argc, char ** argv) {
 
     return run(mode, output_format, op_names_filter, backend_filter, params_filter);
 }
+#endif
