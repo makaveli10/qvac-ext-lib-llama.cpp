@@ -6894,6 +6894,12 @@ static void usage(char ** argv) {
     printf("    --show-coverage shows test coverage\n");
 }
 
+static int run(test_mode mode,
+               output_formats output_format,
+               const char *op_name_filter,
+               const char *backend_filter,
+               const char *params_filter);
+
 int main(int argc, char ** argv) {
     test_mode mode = MODE_TEST;
     output_formats output_format = CONSOLE;
@@ -6953,6 +6959,14 @@ int main(int argc, char ** argv) {
         }
     }
 
+    return run(mode, output_format, op_name_filter, backend_filter, params_filter);
+}
+
+static int run(test_mode mode,
+               output_formats output_format,
+               const char *op_name_filter,
+               const char *backend_filter,
+               const char *params_filter) {
     // load and enumerate backends
     ggml_backend_load_all();
 
