@@ -197,7 +197,16 @@ if (NOT LLAMA_SANITIZE_ADDRESS)
   llama_build_and_test(test-opt.cpp)
 endif()
 llama_build_and_test(test-gguf.cpp)
-llama_build_and_test(test-backend-ops.cpp)
+
+if (NOT ANDROID)
+    llama_build_and_test(test-backend-ops.cpp)
+else()
+    # Build test-backend-ops.cpp as Android native activity
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -u ANativeActivity_onCreate")
+    add_library(test-backend-ops SHARED test-backend-ops.cpp get-model.cpp)
+    target_include_directories(test-backend-ops PRIVATE ${ANDROID_NDK}/sources/android/native_app_glue)
+    target_link_libraries(test-backend-ops PRIVATE common PUBLIC android native_app_glue log)
+endif()
 
 llama_build_and_test(test-model-load-cancel.cpp  LABEL "model")
 llama_build_and_test(test-model-load-disk.cpp    LABEL "model")
