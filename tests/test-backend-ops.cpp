@@ -6898,74 +6898,6 @@ static int run(test_mode mode,
                output_formats output_format,
                const char *op_name_filter,
                const char *backend_filter,
-               const char *params_filter);
-
-int main(int argc, char ** argv) {
-    test_mode mode = MODE_TEST;
-    output_formats output_format = CONSOLE;
-    const char * op_names_filter = nullptr;
-    const char * backend_filter = nullptr;
-    const char * params_filter = nullptr;
-
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "test") == 0) {
-            mode = MODE_TEST;
-        } else if (strcmp(argv[i], "perf") == 0) {
-            mode = MODE_PERF;
-        } else if (strcmp(argv[i], "grad") == 0) {
-            mode = MODE_GRAD;
-        } else if (strcmp(argv[i], "support") == 0) {
-            mode = MODE_SUPPORT;
-        } else if (strcmp(argv[i], "-o") == 0) {
-            if (i + 1 < argc) {
-                op_names_filter = argv[++i];
-            } else {
-                usage(argv);
-                return 1;
-            }
-        } else if (strcmp(argv[i], "-b") == 0) {
-            if (i + 1 < argc) {
-                backend_filter = argv[++i];
-            } else {
-                usage(argv);
-                return 1;
-            }
-        } else if (strcmp(argv[i], "-p") == 0) {
-            if (i + 1 < argc) {
-                params_filter = argv[++i];
-            } else {
-                usage(argv);
-                return 1;
-            }
-        } else if (strcmp(argv[i], "--output") == 0) {
-            if (i + 1 < argc) {
-                if (!output_format_from_str(argv[++i], output_format)) {
-                    usage(argv);
-                    return 1;
-                }
-            } else {
-                usage(argv);
-                return 1;
-            }
-        } else if (strcmp(argv[i], "--list-ops") == 0) {
-            list_all_ops();
-            return 0;
-        } else if (strcmp(argv[i], "--show-coverage") == 0) {
-            show_test_coverage();
-            return 0;
-        } else {
-            usage(argv);
-            return 1;
-        }
-    }
-
-    return run(mode, output_format, op_name_filter, backend_filter, params_filter);
-}
-
-static int run(test_mode mode,
-               output_formats output_format,
-               const char *op_name_filter,
-               const char *backend_filter,
                const char *params_filter) {
     // load and enumerate backends
     ggml_backend_load_all();
@@ -7038,4 +6970,66 @@ static int run(test_mode mode,
     }
 
     return 0;
+}
+
+int main(int argc, char ** argv) {
+    test_mode mode = MODE_TEST;
+    output_formats output_format = CONSOLE;
+    const char * op_names_filter = nullptr;
+    const char * backend_filter = nullptr;
+    const char * params_filter = nullptr;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "test") == 0) {
+            mode = MODE_TEST;
+        } else if (strcmp(argv[i], "perf") == 0) {
+            mode = MODE_PERF;
+        } else if (strcmp(argv[i], "grad") == 0) {
+            mode = MODE_GRAD;
+        } else if (strcmp(argv[i], "support") == 0) {
+            mode = MODE_SUPPORT;
+        } else if (strcmp(argv[i], "-o") == 0) {
+            if (i + 1 < argc) {
+                op_names_filter = argv[++i];
+            } else {
+                usage(argv);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "-b") == 0) {
+            if (i + 1 < argc) {
+                backend_filter = argv[++i];
+            } else {
+                usage(argv);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "-p") == 0) {
+            if (i + 1 < argc) {
+                params_filter = argv[++i];
+            } else {
+                usage(argv);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "--output") == 0) {
+            if (i + 1 < argc) {
+                if (!output_format_from_str(argv[++i], output_format)) {
+                    usage(argv);
+                    return 1;
+                }
+            } else {
+                usage(argv);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "--list-ops") == 0) {
+            list_all_ops();
+            return 0;
+        } else if (strcmp(argv[i], "--show-coverage") == 0) {
+            show_test_coverage();
+            return 0;
+        } else {
+            usage(argv);
+            return 1;
+        }
+    }
+
+    return run(mode, output_format, op_names_filter, backend_filter, params_filter);
 }
