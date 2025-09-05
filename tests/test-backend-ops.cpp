@@ -41,7 +41,19 @@
 #include <vector>
 
 #if defined(ANDROID)
+#include <android/log.h>
 #include <android_native_app_glue.h>
+
+#define LOG_TAG "test-backend-ops"
+
+#define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define ALOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define ALOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+
+#else
+#define ALOGE(...)  printf(__VA_ARGS__)
+#define ALOGW(...)  printf(__VA_ARGS__)
+#define ALOGI(...)  printf(__VA_ARGS__)
 #endif
 
 static void init_tensor_uniform(ggml_tensor * tensor, float min = -1.0f, float max = 1.0f) {
@@ -331,7 +343,7 @@ enum test_mode {
 };
 
 // Output format support similar to llama-bench
-enum output_formats { CONSOLE, SQL, CSV };
+enum output_formats { CONSOLE, SQL, CSV, ANDROID_LOG };
 
 static const char * output_format_str(output_formats format) {
     switch (format) {
@@ -341,6 +353,8 @@ static const char * output_format_str(output_formats format) {
             return "sql";
         case CSV:
             return "csv";
+        case ANDROID_LOG:
+            return "android-log";
         default:
             GGML_ABORT("invalid output format");
     }
@@ -353,6 +367,8 @@ static bool output_format_from_str(const std::string & s, output_formats & forma
         format = SQL;
     } else if (s == "csv") {
         format = CSV;
+    } else if (s == "android-log") {
+        format = ANDROID_LOG;
     } else {
         return false;
     }
@@ -928,6 +944,173 @@ struct csv_printer : public printer {
 
 };
 
+struct android_printer : public printer {
+    void print_test_result(const test_result & result) override {
+        if (result.test_mode == "test") {
+            print_test_console(result);
+        } else if (result.test_mode == "perf") {
+            print_perf_console(result);
+        } else if (result.test_mode == "support") {
+            print_support_console(result);
+        }
+    }
+
+    void print_operation(const test_operation_info & info) override {
+        ALOGI("  %s(%s): ", info.op_name.c_str(), info.op_params.c_str());
+
+        // Handle large tensor skip first
+        if (info.is_large_tensor_skip) {
+            ALOGI("skipping large tensors for speed");
+            return;
+        }
+
+        // Handle not supported status
+        if (info.status == test_status_t::NOT_SUPPORTED) {
+            if (!info.failure_reason.empty()) {
+                ALOGW("not supported [%s]", info.failure_reason.c_str());
+            } else {
+                ALOGW("not supported [%s]", info.backend_name.c_str());
+            }
+            return;
+        }
+
+        // Handle errors and additional information
+        if (info.has_error) {
+            if (info.error_component == "allocation") {
+                ALOGE("failed to allocate tensors [%s] ", info.backend_name.c_str());
+            } else if (info.error_component == "backend") {
+                ALOGE("  Failed to initialize %s backend", info.backend_name.c_str());
+            } else {
+                ALOGE("Error in %s: %s", info.error_component.c_str(), info.error_details.c_str());
+            }
+        }
+
+        // Handle gradient info
+        if (info.has_gradient_info) {
+            ALOGI("[%s] nonfinite gradient at index %" PRId64 " (%s=%f) ", info.op_name.c_str(), info.gradient_index,
+                  info.gradient_param_name.c_str(), info.gradient_value);
+        }
+
+        // Handle MAA error
+        if (info.has_maa_error) {
+            ALOGI("[%s] MAA = %.9f > %.9f ", info.op_name.c_str(), info.maa_error, info.maa_threshold);
+        }
+
+        // Handle compare failure
+        if (info.is_compare_failure) {
+            ALOGE("compare failed");
+        }
+
+        // Print final status
+        if (info.status == test_status_t::OK) {
+            ALOGI("OK");
+        } else {
+            ALOGE("FAIL");
+        }
+    }
+
+    void print_summary(const test_summary_info & info) override {
+        if (info.is_backend_summary) {
+            ALOGI("%zu/%zu backends passed", info.tests_passed, info.tests_total);
+        } else {
+            ALOGI("  %zu/%zu tests passed", info.tests_passed, info.tests_total);
+        }
+    }
+
+    void print_backend_status(const backend_status_info & info) override {
+        ALOGI("  Backend %s: ", info.backend_name.c_str());
+        if (info.status == test_status_t::OK) {
+            ALOGI("OK");
+        } else {
+            ALOGE("FAIL");
+        }
+    }
+
+    void print_testing_start(const testing_start_info & info) override {
+        ALOGI("Testing %zu devices", info.device_count);
+    }
+
+    void print_backend_init(const backend_init_info & info) override {
+        ALOGI("Backend %zu/%zu: %s", info.device_index + 1, info.total_devices, info.device_name.c_str());
+        if (info.skipped) {
+            ALOGI("  %s", info.skip_reason.c_str());
+            return;
+        }
+
+        if (!info.description.empty()) {
+            ALOGI("  Device description: %s", info.description.c_str());
+        }
+
+        if (info.has_memory_info) {
+            ALOGI("  Device memory: %zu MB (%zu MB free)", info.memory_total_mb, info.memory_free_mb);
+        }
+    }
+
+    void print_overall_summary(const overall_summary_info & info) override {
+        ALOGI("%zu/%zu backends passed", info.backends_passed, info.backends_total);
+        if (info.all_passed) {
+            ALOGI("OK");
+        } else {
+            ALOGE("FAIL");
+        }
+    }
+
+private:
+    void print_test_console(const test_result & result) {
+        ALOGI("  %s(%s): ", result.op_name.c_str(), result.op_params.c_str());
+        if (!result.supported) {
+            ALOGW("not supported [%s] ", result.backend_name.c_str());
+            return;
+        }
+
+        if (result.passed) {
+            ALOGI("OK");
+        } else {
+            ALOGE("FAIL");
+        }
+    }
+
+    void print_perf_console(const test_result & result) {
+        ALOGI("  %s(%s): ", result.op_name.c_str(), result.op_params.c_str());
+        if (!result.supported) {
+            ALOGW("not supported");
+            return;
+        }
+
+        ALOGI("    %8d runs - %8.2f us/run - ", result.n_runs, result.time_us);
+
+        if (result.flops > 0) {
+            auto format_flops = [](double flops) -> std::string {
+                char buf[256];
+                if (flops >= 1e12) {
+                    snprintf(buf, sizeof(buf), "%6.2f TFLOP", flops / 1e12);
+                } else if (flops >= 1e9) {
+                    snprintf(buf, sizeof(buf), "%6.2f GFLOP", flops / 1e9);
+                } else if (flops >= 1e6) {
+                    snprintf(buf, sizeof(buf), "%6.2f MFLOP", flops / 1e6);
+                } else {
+                    snprintf(buf, sizeof(buf), "%6.2f kFLOP", flops / 1e3);
+                }
+                return buf;
+            };
+            uint64_t op_flops_per_run = result.flops * result.time_us / 1e6;
+            ALOGI("%s/run - %sS", format_flops(op_flops_per_run).c_str(),
+                  format_flops(result.flops).c_str());
+        } else {
+            ALOGI("%8zu kB/run - %7.2f GB/s", result.memory_kb, result.bandwidth_gb_s);
+        }
+    }
+
+    void print_support_console(const test_result & result) {
+        ALOGI("  %s(%s): ", result.op_name.c_str(), result.op_params.c_str());
+        if (result.supported) {
+            ALOGI("SUPPORTED");
+        } else {
+            ALOGW("NOT SUPPORTED");
+        }
+    }
+};
+
 static std::unique_ptr<printer> create_printer(output_formats format) {
     switch (format) {
         case CONSOLE:
@@ -936,6 +1119,8 @@ static std::unique_ptr<printer> create_printer(output_formats format) {
             return std::make_unique<sql_printer>();
         case CSV:
             return std::make_unique<csv_printer>();
+        case ANDROID_LOG:
+            return std::make_unique<android_printer>();
     }
     GGML_ABORT("invalid output format");
 }
@@ -6980,7 +7165,7 @@ static int run(test_mode mode,
 void android_main(android_app* state) {
     (void) state;
     test_mode mode = MODE_TEST;
-    output_formats output_format = CONSOLE;
+    output_formats output_format = ANDROID_LOG;
     const char * op_name_filter = nullptr;
     const char * backend_filter = nullptr;
     const char * params_filter = nullptr;
