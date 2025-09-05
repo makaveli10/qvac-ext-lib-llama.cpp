@@ -109,7 +109,15 @@ static bool is_pow2(uint32_t x) { return x > 1 && (x & (x-1)) == 0; }
     } while (0)
 
 #ifdef GGML_VULKAN_DEBUG
+#if defined(ANDROID)
+#include <android/log.h>
+#define LOG_TAG "ggml-vulkan"
+#define VK_LOG_DEBUG(msg) { std::stringstream stream; \
+    stream << msg;                                    \
+    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "%s", stream.str().c_str()); }
+#else
 #define VK_LOG_DEBUG(msg) std::cerr << msg << std::endl
+#endif
 #else
 #define VK_LOG_DEBUG(msg) ((void) 0)
 #endif // GGML_VULKAN_DEBUG

@@ -247,7 +247,12 @@ function(ggml_add_backend_library backend)
         install(TARGETS ${backend} EXPORT ggml-targets)
     endif()
 
-    target_link_libraries(${backend} PRIVATE ggml-base)
+    set(ANDROID_LOG_LIBS "")
+    if(ANDROID)
+        set(ANDROID_LOG_LIBS "log")
+    endif()
+
+    target_link_libraries(${backend} PRIVATE ggml-base ${ANDROID_LOG_LIBS})
     target_include_directories(${backend} PRIVATE ..)
 
     if (${BUILD_SHARED_LIBS})
