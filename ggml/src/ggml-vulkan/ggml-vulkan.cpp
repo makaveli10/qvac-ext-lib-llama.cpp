@@ -10458,65 +10458,68 @@ static bool ggml_backend_vk_device_supports_op(ggml_backend_dev_t dev, const ggm
         case GGML_OP_MUL_MAT:
         case GGML_OP_MUL_MAT_ID:
             {
-                ggml_type src0_type = op->src[0]->type;
-                ggml_backend_vk_device_context * ctx = (ggml_backend_vk_device_context *)dev->context;
-                const vk_device& device = ggml_vk_get_device(ctx->device);
-                if (op->op == GGML_OP_MUL_MAT_ID) {
-                    if (!device->mul_mat_id_s[src0_type] && !device->mul_mat_id_m[src0_type] && !device->mul_mat_id_l[src0_type]) {
-                        // If there's not enough shared memory for row_ids and the result tile, fallback to CPU
-                        return false;
-                    }
-                }
-                switch (src0_type) {
-                    case GGML_TYPE_F32:
-                    case GGML_TYPE_F16:
-                    case GGML_TYPE_BF16:
-                    case GGML_TYPE_Q4_0:
-                    case GGML_TYPE_Q4_1:
-                    case GGML_TYPE_Q5_0:
-                    case GGML_TYPE_Q5_1:
-                    case GGML_TYPE_Q8_0:
-                    case GGML_TYPE_Q2_K:
-                    case GGML_TYPE_Q3_K:
-                    case GGML_TYPE_Q4_K:
-                    case GGML_TYPE_Q5_K:
-                    case GGML_TYPE_Q6_K:
-                    case GGML_TYPE_IQ1_S:
-                    case GGML_TYPE_IQ1_M:
-                    case GGML_TYPE_IQ2_XXS:
-                    case GGML_TYPE_IQ2_XS:
-                    case GGML_TYPE_IQ2_S:
-                    case GGML_TYPE_IQ3_XXS:
-                    case GGML_TYPE_IQ3_S:
-                    case GGML_TYPE_IQ4_XS:
-                    case GGML_TYPE_IQ4_NL:
-                        break;
-                    default:
-                        return false;
-                }
-                struct ggml_tensor * a;
-                struct ggml_tensor * b;
-                if (op->op == GGML_OP_MUL_MAT) {
-                    a = op->src[0];
-                    b = op->src[1];
-                } else {
-                    a = op->src[2];
-                    b = op->src[1];
-                }
-                if (a->ne[3] != b->ne[3]) {
-                    return false;
-                }
-                if (!(ggml_vk_dim01_contiguous(op->src[0]) || op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16 || op->src[0]->type == GGML_TYPE_BF16) ||
-                    !(ggml_vk_dim01_contiguous(op->src[1]) || op->src[1]->type == GGML_TYPE_F32 || op->src[1]->type == GGML_TYPE_F16)) {
-                    return false;
-                }
-                if (op->src[0]->type == GGML_TYPE_BF16 && op->src[1]->type == GGML_TYPE_F16) {
-                    // We currently don't have a bf16 x f16 shader, or an fp16->bf16 copy shader.
-                    // So don't support this combination for now.
-                    return false;
-                }
+                // ggml_type src0_type = op->src[0]->type;
+                // ggml_backend_vk_device_context * ctx = (ggml_backend_vk_device_context *)dev->context;
+                // const vk_device& device = ggml_vk_get_device(ctx->device);
+                // if (op->op == GGML_OP_MUL_MAT_ID) {
+                //     if (!device->mul_mat_id_s[src0_type] && !device->mul_mat_id_m[src0_type] && !device->mul_mat_id_l[src0_type]) {
+                //         // If there's not enough shared memory for row_ids and the result tile, fallback to CPU
+                //         return false;
+                //     }
+                // }
 
-                return true;
+                return false;
+
+            //     switch (src0_type) {
+            //         case GGML_TYPE_F32:
+            //         case GGML_TYPE_F16:
+            //         case GGML_TYPE_BF16:
+            //         case GGML_TYPE_Q4_0:
+            //         case GGML_TYPE_Q4_1:
+            //         case GGML_TYPE_Q5_0:
+            //         case GGML_TYPE_Q5_1:
+            //         case GGML_TYPE_Q8_0:
+            //         case GGML_TYPE_Q2_K:
+            //         case GGML_TYPE_Q3_K:
+            //         case GGML_TYPE_Q4_K:
+            //         case GGML_TYPE_Q5_K:
+            //         case GGML_TYPE_Q6_K:
+            //         case GGML_TYPE_IQ1_S:
+            //         case GGML_TYPE_IQ1_M:
+            //         case GGML_TYPE_IQ2_XXS:
+            //         case GGML_TYPE_IQ2_XS:
+            //         case GGML_TYPE_IQ2_S:
+            //         case GGML_TYPE_IQ3_XXS:
+            //         case GGML_TYPE_IQ3_S:
+            //         case GGML_TYPE_IQ4_XS:
+            //         case GGML_TYPE_IQ4_NL:
+            //             break;
+            //         default:
+            //             return false;
+            //     }
+            //     struct ggml_tensor * a;
+            //     struct ggml_tensor * b;
+            //     if (op->op == GGML_OP_MUL_MAT) {
+            //         a = op->src[0];
+            //         b = op->src[1];
+            //     } else {
+            //         a = op->src[2];
+            //         b = op->src[1];
+            //     }
+            //     if (a->ne[3] != b->ne[3]) {
+            //         return false;
+            //     }
+            //     if (!(ggml_vk_dim01_contiguous(op->src[0]) || op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16 || op->src[0]->type == GGML_TYPE_BF16) ||
+            //         !(ggml_vk_dim01_contiguous(op->src[1]) || op->src[1]->type == GGML_TYPE_F32 || op->src[1]->type == GGML_TYPE_F16)) {
+            //         return false;
+            //     }
+            //     if (op->src[0]->type == GGML_TYPE_BF16 && op->src[1]->type == GGML_TYPE_F16) {
+            //         // We currently don't have a bf16 x f16 shader, or an fp16->bf16 copy shader.
+            //         // So don't support this combination for now.
+            //         return false;
+            //     }
+
+            //     return true;
             } break;
         case GGML_OP_FLASH_ATTN_EXT:
             {

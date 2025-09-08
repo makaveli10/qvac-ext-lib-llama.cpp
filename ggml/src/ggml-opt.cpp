@@ -484,6 +484,9 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
         }
     } else if (opt_ctx->build_type_alloc == GGML_OPT_BUILD_TYPE_GRAD) {
         opt_ctx->buf_static = ggml_backend_alloc_ctx_tensors(opt_ctx->ctx_static, ggml_backend_sched_get_backend(opt_ctx->backend_sched, 0));
+        // // Allocate gradient accumulators on CPU so that any CPU-only ops can run safely
+        // opt_ctx->buf_static = ggml_backend_alloc_ctx_tensors_from_buft(
+        //     opt_ctx->ctx_static, ggml_backend_cpu_buffer_type());
         ggml_graph_reset(opt_ctx->gb_grad);
     }
 
@@ -505,6 +508,12 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
             struct ggml_tensor * v        = opt_ctx->grad_v[i];
             struct ggml_tensor * opt_step = ggml_opt_step_adamw(opt_ctx->ctx_compute, node, grad, m, v, opt_ctx->adamw_params);
 
+            // Ensure optimizer runs on CPU, mark the destination tensor backend as CPU
+            if (opt_ctx->backend_sched) {
+                ggml_backend_t cpu_backend = ggml_backend_sched_get_backend(opt_ctx->backend_sched, ggml_backend_sched_get_n_backends(opt_ctx->backend_sched) - 1);
+                ggml_backend_sched_set_tensor_backend(opt_ctx->backend_sched, opt_step, cpu_backend);
+            }
+
             ggml_set_name(m,        (std::string("AdamW m for ")    + std::string(node->name)).c_str());
             ggml_set_name(v,        (std::string("AdamW v for ")    + std::string(node->name)).c_str());
             ggml_set_name(opt_step, (std::string("AdamW step for ") + std::string(node->name)).c_str());
@@ -514,8 +523,10 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
     }
 
     if (!opt_ctx->buf_static) {
-        opt_ctx->buf_static = ggml_backend_alloc_ctx_tensors(
-            opt_ctx->ctx_static, ggml_backend_sched_get_backend(opt_ctx->backend_sched, 0));
+        // Allocate optimizer state (m, v) and any remaining static tensors on CPU buffers
+        // to ensure OPT_STEP_ADAMW executes on CPU without buffer/backend mismatches.
+        opt_ctx->buf_static = ggml_backend_alloc_ctx_tensors_from_buft(
+            opt_ctx->ctx_static, ggml_backend_cpu_buffer_type());
         ggml_graph_reset(opt_ctx->gb_opt);
     }
 

@@ -280,6 +280,17 @@ void ggml_backend_tensor_get(const struct ggml_tensor * tensor, void * data, siz
     GGML_ASSERT(tensor->data != NULL && "tensor not allocated");
     GGML_ASSERT(offset + size <= ggml_nbytes(tensor) && "tensor read out of bounds");
 
+    if (buf->iface.get_tensor == NULL) {
+        // Fallback to direct memory copy if tensor data is host accessible
+        if (tensor->data) {
+            memcpy(data, (char*)tensor->data + offset, size);
+            return;
+        } else {
+            fprintf(stderr, "ERROR: Cannot perform tensor_get - both buffer interface and direct access failed for tensor '%s'\n", tensor->name);
+            abort();
+        }
+    }
+
     buf->iface.get_tensor(buf, tensor, data, offset, size);
 }
 
@@ -1111,6 +1122,51 @@ static void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct gg
             }
 
             const int node_backend_id = tensor_backend_id(node);
+
+            if (sched->debug) {
+                printf("[SCHED_SPLIT] Node %d: op=%s(%d), name='%s', backend_id=%d (%s)\n",
+                       i, ggml_op_name(node->op), node->op,
+                       node->name ? node->name : "unnamed",
+                       node_backend_id,
+                       node_backend_id >= 0 ? ggml_backend_name(sched->backends[node_backend_id]) : "UNASSIGNED");
+
+                // Print tensor information including buffer details
+                printf("  -> dst: type=%s, is_view=%s",
+                       ggml_type_name(node->type),
+                       node->view_src ? "true" : "false");
+
+                if (node->buffer) {
+                    ggml_backend_buffer_type_t buf_type = ggml_backend_buffer_get_type(node->buffer);
+                    printf(", buffer_type=%s, is_host=%s",
+                           ggml_backend_buft_name(buf_type),
+                           ggml_backend_buffer_is_host(node->buffer) ? "true" : "false");
+                }
+                printf("\n");
+
+                // Print source tensors
+                for (int j = 0; j < GGML_MAX_SRC; j++) {
+                    struct ggml_tensor * src = node->src[j];
+                    if (src == NULL) continue;
+
+                    size_t src_id = hash_id(src);
+                    int src_backend_id = sched->hv_tensor_backend_ids[src_id];
+
+                    printf("  -> src[%d]: name='%s', backend_id=%d (%s), type=%s",
+                           j, src->name ? src->name : "unnamed",
+                           src_backend_id,
+                           src_backend_id >= 0 ? ggml_backend_name(sched->backends[src_backend_id]) : "UNASSIGNED",
+                           ggml_type_name(src->type));
+
+                    if (src->buffer) {
+                        ggml_backend_buffer_type_t buf_type = ggml_backend_buffer_get_type(src->buffer);
+                        printf(", buffer_type=%s, is_host=%s",
+                               ggml_backend_buft_name(buf_type),
+                               ggml_backend_buffer_is_host(src->buffer) ? "true" : "false");
+                    }
+                    printf("\n");
+                }
+                printf("\n");
+            }
 
             assert(node_backend_id != -1); // all nodes should be assigned by now, this can happen if there is no CPU fallback
 
