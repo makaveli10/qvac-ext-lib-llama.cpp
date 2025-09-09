@@ -5369,22 +5369,37 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
     const uint32_t tile_m = do_tile_m ? split_m_env : (uint32_t)ne01;
     const uint32_t tile_n = do_tile_n ? split_n_env : (uint32_t)ne11;
 
-    const uint32_t split_k_use = do_tiling ? 1u : split_k;
+    // if (!do_tiling) {
+    //     ggml_vk_matmul(
+    //         ctx, subctx, pipeline,
+    //         { d_X, x_buf_offset, x_sz * ne02 * ne03 }, { d_Y, y_buf_offset, y_sz * ne12 * ne13 },
+    //         { d_D, d_buf_offset, d_sz * ne12 * ne13 }, { ctx->prealloc_split_k, 0, d_sz * ne12 * ne13 * split_k_use },
+    //         ne01, ne11, ne10,
+    //         ne10, ne10, ne01, stride_batch_x, stride_batch_y, ne20*ne21,
+    //         split_k_use, ne12*ne13, ne02, ne12, r2, r3, padded_n
+    //     );
+    // } else {
+        // Let's check the alignments if it violates the device alignment.
+        const uint64_t align = ctx->device->properties.limits.minStorageBufferOffsetAlignment;
+        for (uint32_t n0 = 0; n0 < ne11; n0 += (do_tile_n ? split_n_env : (uint32_t)ne11)) {
+            const uint32_t nt = std::min((do_tile_n ? split_n_env : (uint32_t)ne11), (uint32_t)ne11 - n0);
+            const uint64_t b_off_bytes = y_buf_offset + (uint64_t)n0 * (uint64_t)stride_b_elems * (uint64_t)bytes_per_unit_B;
+            const uint64_t d_off_bytes_n = d_buf_offset + (uint64_t)n0 * (uint64_t)stride_d_elems * (uint64_t)bytes_per_unit_D;
+            for (uint32_t m0 = 0; m0 < ne01; m0 += (do_tile_m ? split_m_env : (uint32_t)ne01)) {
+                const uint32_t mt = std::min((do_tile_m ? split_m_env : (uint32_t)ne01), (uint32_t)ne01 - m0);
+                const uint64_t a_off_bytes = x_buf_offset + (uint64_t)m0 * (uint64_t)stride_a_elems * (uint64_t)bytes_per_unit_A;
+                const uint64_t d_off_bytes = d_off_bytes_n + (uint64_t)m0 * (uint64_t)bytes_per_unit_D;
+                if ((a_off_bytes % align) != 0 || (b_off_bytes % align) != 0 || (d_off_bytes % align) != 0) {
+                    if (tiling_debug) {
+                        std::cerr << "[VK] abort tiling: a_off=" << a_off_bytes << " b_off=" << b_off_bytes << " d_off=" << d_off_bytes << " align=" << align << std::endl;
+                    }
+                    exit(0);
+                }
+            }
+        }
 
-    if (!do_tiling) {
-        ggml_vk_matmul(
-            ctx, subctx, pipeline,
-            { d_X, x_buf_offset, x_sz * ne02 * ne03 }, { d_Y, y_buf_offset, y_sz * ne12 * ne13 },
-            { d_D, d_buf_offset, d_sz * ne12 * ne13 }, { ctx->prealloc_split_k, 0, d_sz * ne12 * ne13 * split_k_use },
-            ne01, ne11, ne10,
-            ne10, ne10, ne01, stride_batch_x, stride_batch_y, ne20*ne21,
-            split_k_use, ne12*ne13, ne02, ne12, r2, r3, padded_n
-        );
-    } else {
         if (tiling_debug) {
-            std::cerr << "[VK] mul_mat tiled: M=" << ne01 << " N=" << ne11 << " K=" << ne10
-                      << " tile_m=" << tile_m << " tile_n=" << tile_n
-                      << " batches=" << (ne12*ne13) << " split_k=1" << std::endl;
+            std::cerr << "[VK] mul_mat tiled: M=" << ne01 << " N=" << ne11 << " K=" << ne10 << " tile_m=" << tile_m << " tile_n=" << tile_n << " batches=" << (ne12*ne13) << " split_k=1" << std::endl;
         }
 
         for (uint32_t n0 = 0; n0 < ne11; n0 += tile_n) {
@@ -5392,13 +5407,20 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
             const uint64_t b_off_bytes = y_buf_offset + (uint64_t)n0 * (uint64_t)stride_b_elems * (uint64_t)bytes_per_unit_B;
             const uint64_t d_off_bytes_n = d_buf_offset + (uint64_t)n0 * (uint64_t)stride_d_elems * (uint64_t)bytes_per_unit_D;
 
+            // How many are safe to read within the current n-tile.
+            const uint32_t wgN = pipeline->wg_denoms[1];
+            const uint32_t padded_remaining = (padded_n > n0) ? (uint32_t)(padded_n - n0) : nt;
+            const uint32_t padded_req = (wgN > 0) ? (CEIL_DIV(nt, wgN) * wgN) : nt;
+            const uint32_t padded_n_tile = std::min(padded_remaining, padded_req);
+
             for (uint32_t m0 = 0; m0 < ne01; m0 += tile_m) {
                 const uint32_t mt = std::min(tile_m, (uint32_t)ne01 - m0);
                 const uint64_t a_off_bytes = x_buf_offset + (uint64_t)m0 * (uint64_t)stride_a_elems * (uint64_t)bytes_per_unit_A;
                 const uint64_t d_off_bytes = d_off_bytes_n + (uint64_t)m0 * (uint64_t)bytes_per_unit_D;
 
                 if (tiling_debug) {
-                    std::cerr << "[VK]  tile m=[" << m0 << "," << (m0+mt) << ") n=[" << n0 << "," << (n0+nt) << ")" << std::endl;
+                    std::cerr << "[VK]  tile m=[" << m0 << "," << (m0+mt) << ") n=[" << n0 << "," << (n0+nt) << ") padded_n_tile=" << padded_n_tile << std::endl;
+                    // std::cerr << "[VK]  d_X = " << d_X << " a_off_bytes = " << a_off_bytes << " d_Y = " << d_Y << " b_off_bytes = " << b_off_bytes << " d_D = " << d_D << " d_off_bytes = " << d_off_bytes << std::endl;
                 }
 
                 ggml_vk_matmul(
@@ -5407,11 +5429,11 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
                     { d_D, d_off_bytes, VK_WHOLE_SIZE }, { nullptr, 0, 0 },
                     mt, nt, (uint32_t)ne10,
                     ne10, ne10, ne01, stride_batch_x, stride_batch_y, ne20*ne21,
-                    1u, (uint32_t)(ne12*ne13), (uint32_t)ne02, (uint32_t)ne12, (uint32_t)r2, (uint32_t)r3, padded_n
+                    1u, (uint32_t)(ne12*ne13), (uint32_t)ne02, (uint32_t)ne12, (uint32_t)r2, (uint32_t)r3, padded_n_tile
                 );
             }
         }
-    }
+    // }
 }
 
 static void ggml_vk_mul_mat_vec_q_f16(ggml_backend_vk_context * ctx, vk_context& subctx, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst, bool dryrun = false) {
