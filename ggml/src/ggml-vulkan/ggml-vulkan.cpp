@@ -5119,6 +5119,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
 
     bool src0_uma = false;
     bool src1_uma = false;
+    bool do_tiling = true;
 
     if (ctx->device->uma) {
         ggml_vk_host_get(ctx->device, src0->data, d_Qx, qx_buf_offset);
@@ -5235,12 +5236,11 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
         const uint32_t split_n_env = getenv_u32("GGML_MUL_MAT_SPLIT_N", 0);
         const bool do_tile_m = split_m_env > 0 && split_m_env < ne01;
         const bool do_tile_n = split_n_env > 0 && split_n_env < ne11;
-        const bool do_tiling = do_tile_m || do_tile_n;
         const uint32_t tile_m = do_tile_m ? split_m_env : (uint32_t)ne01;
         const uint32_t tile_n = do_tile_n ? split_n_env : (uint32_t)ne11;
         const uint32_t m_tiles = CEIL_DIV((uint32_t)ne01, tile_m);
         const uint32_t n_tiles = CEIL_DIV((uint32_t)ne11, tile_n);
-        const uint32_t num_dispatches = do_tiling ? (m_tiles * n_tiles) : 1u;
+        const uint32_t num_dispatches = m_tiles * n_tiles;
 
         ggml_pipeline_request_descriptor_sets(ctx, pipeline, num_dispatches);
         if (qx_needs_dequant) {
@@ -5337,7 +5337,6 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
 
     const bool do_tile_m = split_m_env > 0 && split_m_env < ne01;
     const bool do_tile_n = split_n_env > 0 && split_n_env < ne11;
-    const bool do_tiling = do_tile_m || do_tile_n;
 
     const uint32_t stride_a_elems = (uint32_t)ne10;
     const uint32_t stride_b_elems = (uint32_t)ne10;
@@ -5382,11 +5381,9 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
         // Let's check the alignments if it violates the device alignment.
         const uint64_t align = ctx->device->properties.limits.minStorageBufferOffsetAlignment;
         for (uint32_t n0 = 0; n0 < ne11; n0 += (do_tile_n ? split_n_env : (uint32_t)ne11)) {
-            const uint32_t nt = std::min((do_tile_n ? split_n_env : (uint32_t)ne11), (uint32_t)ne11 - n0);
             const uint64_t b_off_bytes = y_buf_offset + (uint64_t)n0 * (uint64_t)stride_b_elems * (uint64_t)bytes_per_unit_B;
             const uint64_t d_off_bytes_n = d_buf_offset + (uint64_t)n0 * (uint64_t)stride_d_elems * (uint64_t)bytes_per_unit_D;
             for (uint32_t m0 = 0; m0 < ne01; m0 += (do_tile_m ? split_m_env : (uint32_t)ne01)) {
-                const uint32_t mt = std::min((do_tile_m ? split_m_env : (uint32_t)ne01), (uint32_t)ne01 - m0);
                 const uint64_t a_off_bytes = x_buf_offset + (uint64_t)m0 * (uint64_t)stride_a_elems * (uint64_t)bytes_per_unit_A;
                 const uint64_t d_off_bytes = d_off_bytes_n + (uint64_t)m0 * (uint64_t)bytes_per_unit_D;
                 if ((a_off_bytes % align) != 0 || (b_off_bytes % align) != 0 || (d_off_bytes % align) != 0) {
@@ -5411,7 +5408,8 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
             const uint32_t wgN = pipeline->wg_denoms[1];
             const uint32_t padded_remaining = (padded_n > n0) ? (uint32_t)(padded_n - n0) : nt;
             const uint32_t padded_req = (wgN > 0) ? (CEIL_DIV(nt, wgN) * wgN) : nt;
-            const uint32_t padded_n_tile = std::min(padded_remaining, padded_req);
+            const bool strict_pad = getenv("GGML_VK_TILING_PADDED_N_STRICT") != nullptr;
+            const uint32_t padded_n_tile = strict_pad ? nt : std::min(padded_remaining, padded_req);
 
             for (uint32_t m0 = 0; m0 < ne01; m0 += tile_m) {
                 const uint32_t mt = std::min(tile_m, (uint32_t)ne01 - m0);
@@ -5423,10 +5421,14 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
                     // std::cerr << "[VK]  d_X = " << d_X << " a_off_bytes = " << a_off_bytes << " d_Y = " << d_Y << " b_off_bytes = " << b_off_bytes << " d_D = " << d_D << " d_off_bytes = " << d_off_bytes << std::endl;
                 }
 
+                const uint64_t a_size_bytes = d_X->size > a_off_bytes ? (d_X->size - a_off_bytes) : 0;
+                const uint64_t b_size_bytes = d_Y->size > b_off_bytes ? (d_Y->size - b_off_bytes) : 0;
+                const uint64_t d_size_bytes = d_D->size > d_off_bytes ? (d_D->size - d_off_bytes) : 0;
+
                 ggml_vk_matmul(
                     ctx, subctx, pipeline,
-                    { d_X, a_off_bytes, VK_WHOLE_SIZE }, { d_Y, b_off_bytes, VK_WHOLE_SIZE },
-                    { d_D, d_off_bytes, VK_WHOLE_SIZE }, { nullptr, 0, 0 },
+                    { d_X, a_off_bytes, a_size_bytes }, { d_Y, b_off_bytes, b_size_bytes },
+                    { d_D, d_off_bytes, d_size_bytes }, { nullptr, 0, 0 },
                     mt, nt, (uint32_t)ne10,
                     ne10, ne10, ne01, stride_batch_x, stride_batch_y, ne20*ne21,
                     1u, (uint32_t)(ne12*ne13), (uint32_t)ne02, (uint32_t)ne12, (uint32_t)r2, (uint32_t)r3, padded_n_tile
