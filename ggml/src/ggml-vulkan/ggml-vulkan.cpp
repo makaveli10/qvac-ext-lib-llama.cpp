@@ -5405,11 +5405,7 @@ static void ggml_vk_mul_mat_q_f16(ggml_backend_vk_context * ctx, vk_context& sub
             const uint64_t d_off_bytes_n = d_buf_offset + (uint64_t)n0 * (uint64_t)stride_d_elems * (uint64_t)bytes_per_unit_D;
 
             // How many are safe to read within the current n-tile.
-            const uint32_t wgN = pipeline->wg_denoms[1];
-            const uint32_t padded_remaining = (padded_n > n0) ? (uint32_t)(padded_n - n0) : nt;
-            const uint32_t padded_req = (wgN > 0) ? (CEIL_DIV(nt, wgN) * wgN) : nt;
-            const bool strict_pad = getenv("GGML_VK_TILING_PADDED_N_STRICT") != nullptr;
-            const uint32_t padded_n_tile = strict_pad ? nt : std::min(padded_remaining, padded_req);
+            const uint32_t padded_n_tile = nt;
 
             for (uint32_t m0 = 0; m0 < ne01; m0 += tile_m) {
                 const uint32_t mt = std::min(tile_m, (uint32_t)ne01 - m0);
