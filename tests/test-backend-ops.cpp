@@ -7162,6 +7162,8 @@ static int run(test_mode mode,
 }
 
 #if defined(ANDROID)
+#include <filesystem>
+
 void android_main(android_app* state) {
     (void) state;
     test_mode mode = MODE_TEST;
@@ -7169,6 +7171,11 @@ void android_main(android_app* state) {
     const char * op_name_filter = nullptr;
     const char * backend_filter = nullptr;
     const char * params_filter = nullptr;
+
+    std::filesystem::path cwd = std::filesystem::current_path();
+    ALOGE("old current path: %s", cwd.string().c_str());
+    std::filesystem::current_path("/data/user/0/ai.ggml.llamacpp");
+    ALOGE("new current path: %s", cwd.string().c_str());
 
     run(mode, output_format, op_name_filter, backend_filter, params_filter);
 }
