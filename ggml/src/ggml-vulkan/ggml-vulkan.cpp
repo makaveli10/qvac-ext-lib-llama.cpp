@@ -380,6 +380,7 @@ struct vk_device_struct {
 
     vk::PhysicalDevice physical_device;
     vk::PhysicalDeviceProperties properties;
+    vk::PhysicalDeviceDescriptorBufferPropertiesEXT descriptor_buffer_props;
     std::string name;
     uint64_t max_memory_allocation_size;
     uint64_t suballocation_block_size;
@@ -3770,6 +3771,7 @@ static vk_device ggml_vk_get_device(size_t idx) {
 
         device->physical_device.getProperties2(&props2);
         device->properties = props2.properties;
+        device->descriptor_buffer_props = descriptor_buffer_props;
         device->vendor_id = device->properties.vendorID;
         device->driver_id = driver_props.driverID;
 
