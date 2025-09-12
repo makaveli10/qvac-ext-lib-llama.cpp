@@ -1930,6 +1930,13 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
         throw vk::OutOfDeviceMemoryError("Requested buffer size exceeds device memory allocation limit");
     }
 
+    if (device->descriptor_buffer_props.descriptorBufferAddressSpaceSize > 0) {
+        if (size > device->descriptor_buffer_props.descriptorBufferAddressSpaceSize) {
+            GGML_LOG_ERROR("Buffer size of 0x%lX exceeds descriptorBufferAddressSpaceSize of 0x%lX!\n",
+                           size, device->descriptor_buffer_props.descriptorBufferAddressSpaceSize);
+        }
+    }
+
     vk_buffer buf = std::make_shared<vk_buffer_struct>();
 
     if (size == 0) {
@@ -5199,6 +5206,22 @@ static void ggml_vk_dispatch_pipeline(ggml_backend_vk_context* ctx, vk_context& 
 
     vk::DescriptorSet& descriptor_set = ctx->descriptor_sets[ctx->descriptor_set_idx++];
     vk::WriteDescriptorSet write_descriptor_set{ descriptor_set, 0, 0, pipeline->parameter_count, vk::DescriptorType::eStorageBuffer, nullptr, descriptor_buffer_infos.begin() };
+
+    // Validate descriptor limits
+    for (const vk::DescriptorBufferInfo& buffer_info : descriptor_buffer_infos) {
+        if (buffer_info.range == VK_WHOLE_SIZE) {
+            continue;
+        }
+
+        if (ctx->device->properties.limits.maxStorageBufferRange != UINT32_MAX) {
+            if (buffer_info.range > ctx->device->properties.limits.maxStorageBufferRange) {
+                GGML_LOG_ERROR("Buffer range of 0x%lX exceeds maxStorageBufferRange of 0x%X!\n",
+                               buffer_info.range,
+                               ctx->device->properties.limits.maxStorageBufferRange);
+            }
+        }
+    }
+
     ctx->device->device.updateDescriptorSets({ write_descriptor_set }, {});
 
     subctx->s->buffer.pushConstants(pipeline->layout, vk::ShaderStageFlagBits::eCompute, 0, push_constant_size(push_constants), push_constant_data(push_constants));
