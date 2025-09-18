@@ -5207,6 +5207,24 @@ static void ggml_vk_dispatch_pipeline(ggml_backend_vk_context* ctx, vk_context& 
     vk::DescriptorSet& descriptor_set = ctx->descriptor_sets[ctx->descriptor_set_idx++];
     vk::WriteDescriptorSet write_descriptor_set{ descriptor_set, 0, 0, pipeline->parameter_count, vk::DescriptorType::eStorageBuffer, nullptr, descriptor_buffer_infos.begin() };
 
+    // Some buffer ranges are 0, fix them
+    {
+        std::vector<vk::DescriptorBufferInfo> new_buffer_infos;
+        bool replace_buffer_infos = false;
+
+        for (vk::DescriptorBufferInfo buffer_info : descriptor_buffer_infos) {
+            if (buffer_info.range <= 0) {
+                GGML_LOG_WARN("Buffer range is 0! Setting to VK_WHOLE_SIZE\n");
+                buffer_info.range = VK_WHOLE_SIZE;
+                replace_buffer_infos = true;
+            }
+            new_buffer_infos.push_back(buffer_info);
+        }
+        if (replace_buffer_infos) {
+            write_descriptor_set.setBufferInfo(new_buffer_infos);
+        }
+    }
+
     // Validate descriptor limits
     for (const vk::DescriptorBufferInfo& buffer_info : descriptor_buffer_infos) {
         if (buffer_info.range == VK_WHOLE_SIZE) {
