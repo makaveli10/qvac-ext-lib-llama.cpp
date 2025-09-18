@@ -19,7 +19,6 @@
 #include <limits>
 #include <map>
 #include <unordered_map>
-#include <memory>
 #include <mutex>
 #include <future>
 #include <thread>
