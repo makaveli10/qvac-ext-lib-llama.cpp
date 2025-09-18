@@ -51,6 +51,10 @@
 #include <windows.h>
 #endif
 
+#if defined(ANDROID)
+#include <android/log.h>
+#endif
+
 #define UNUSED GGML_UNUSED
 
 #if defined(_MSC_VER)
@@ -272,11 +276,39 @@ void ggml_log_internal(enum ggml_log_level level, const char * format, ...) {
     va_end(args);
 }
 
+#if defined(ANDROID)
+#define LOG_TAG "ggml"
+
+static android_LogPriority ggml_to_android_log_level(enum ggml_log_level level) {
+    switch (level) {
+        case GGML_LOG_LEVEL_NONE:
+            return ANDROID_LOG_DEFAULT;
+        case GGML_LOG_LEVEL_DEBUG:
+            return ANDROID_LOG_DEBUG;
+        case GGML_LOG_LEVEL_INFO:
+            return ANDROID_LOG_INFO;
+        case GGML_LOG_LEVEL_WARN:
+            return ANDROID_LOG_WARN;
+        case GGML_LOG_LEVEL_ERROR:
+            return ANDROID_LOG_ERROR;
+        default:
+            return ANDROID_LOG_DEFAULT;
+    }
+}
+#endif
+
+
 void ggml_log_callback_default(enum ggml_log_level level, const char * text, void * user_data) {
+#if !defined(ANDROID)
     (void) level;
     (void) user_data;
     fputs(text, stderr);
     fflush(stderr);
+#else
+    (void) user_data;
+    android_LogPriority android_level = ggml_to_android_log_level(level);
+    __android_log_print(android_level, LOG_TAG, text, "");
+#endif
 }
 
 //

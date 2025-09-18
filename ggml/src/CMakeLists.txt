@@ -392,7 +392,12 @@ foreach (target ggml-base ggml)
     target_compile_features   (${target} PRIVATE c_std_11 cxx_std_17) # don't bump
 endforeach()
 
-target_link_libraries(ggml-base PRIVATE Threads::Threads)
+set(ANDROID_LOG_LIBS "")
+if(ANDROID)
+    set(ANDROID_LOG_LIBS "log")
+endif()
+
+target_link_libraries(ggml-base PRIVATE Threads::Threads ${ANDROID_LOG_LIBS})
 
 find_library(MATH_LIBRARY m)
 if (MATH_LIBRARY)
