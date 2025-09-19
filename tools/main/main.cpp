@@ -35,6 +35,11 @@
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
 
+#if defined(ANDROID)
+#include <android_native_app_glue.h>
+#include <android/log.h>
+#endif
+
 static llama_context           ** g_ctx;
 static llama_model             ** g_model;
 static common_sampler          ** g_smpl;
@@ -1287,3 +1292,46 @@ static void print_bench_table(const std::vector<cli_run_summary> & summaries) {
         "high", max_tokens, max_ttft, max_prompt_speed, max_gen_speed, max_total_speed,
         max_model_buf_out, max_cpu_buf_out);
 }
+
+#if defined(ANDROID)
+
+#define LOG_TAG "llama-cli"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+void android_main(android_app* state) {
+    ANativeActivity* activity = state->activity;
+
+    // Params
+    std::string gguf_file_name = "Qwen3_0.6B.Q8_0.gguf";
+    // std::string gguf_file_name = "gemma-3-1b-it-Q4_0.gguf";
+    std::string prompt = "What is the tallest building in the world?";
+
+    std::filesystem::path external_files_path = std::filesystem::path(activity->externalDataPath);
+
+    std::filesystem::path gguf_path = external_files_path / gguf_file_name;
+    if (!std::filesystem::exists(gguf_path)) {
+        LOGE("Error: The model file at %s does not exist.", gguf_path.string().c_str());
+        LOGE("Download the model in the app or copy it using adb or mtp.");
+        return;
+    }
+
+    try {
+        size_t size = std::filesystem::file_size(gguf_path);
+        double size_mebi_byte = static_cast<double>(size) / std::pow(1024.0, 2.0);
+        LOGI("Found %s with %.2f MiB (%ld bytes)", gguf_file_name.c_str(), size_mebi_byte, size);
+    } catch (std::filesystem::filesystem_error& e) {
+        LOGE("Failed to read the model file at %s: %s", gguf_path.string().c_str(), e.what());
+        LOGE("Download the model in the app or copy it using adb or mtp.");
+        return;
+    }
+
+    std::vector<const char*> args = {
+            "llama-cli", "-m",
+            strdup(gguf_path.string().c_str()),
+            "-ngl", "999", "-p", prompt.c_str()
+    };
+
+    main(args.size(), const_cast<char **>(args.data()));
+}
+#endif
