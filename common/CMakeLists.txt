@@ -149,7 +149,13 @@ target_include_directories(
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 target_compile_features   (${TARGET} PUBLIC cxx_std_17)
-target_link_libraries     (${TARGET} PRIVATE ${LLAMA_COMMON_EXTRA_LIBS} PUBLIC llama Threads::Threads)
+
+set(ANDROID_LOG_LIBS "")
+if(ANDROID)
+    set(ANDROID_LOG_LIBS "log")
+endif()
+
+target_link_libraries     (${TARGET} PRIVATE ${LLAMA_COMMON_EXTRA_LIBS} PUBLIC llama Threads::Threads ${ANDROID_LOG_LIBS})
 
 
 #

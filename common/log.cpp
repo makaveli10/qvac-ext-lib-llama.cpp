@@ -20,6 +20,10 @@
 #    include <unistd.h>
 #endif // defined(_WIN32)
 
+#if defined(ANDROID)
+#include <android/log.h>
+#endif
+
 int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
 
 void common_log_set_verbosity_thold(int verbosity) {
@@ -80,6 +84,25 @@ static std::vector<const char *> g_col = {
     "",
 };
 
+#if defined(ANDROID)
+static android_LogPriority ggml_to_android_log_level(enum ggml_log_level level) {
+    switch (level) {
+        case GGML_LOG_LEVEL_NONE:
+            return ANDROID_LOG_DEFAULT;
+        case GGML_LOG_LEVEL_DEBUG:
+            return ANDROID_LOG_DEBUG;
+        case GGML_LOG_LEVEL_INFO:
+            return ANDROID_LOG_INFO;
+        case GGML_LOG_LEVEL_WARN:
+            return ANDROID_LOG_WARN;
+        case GGML_LOG_LEVEL_ERROR:
+            return ANDROID_LOG_ERROR;
+        default:
+            return ANDROID_LOG_DEFAULT;
+    }
+}
+#endif
+
 struct common_log_entry {
     enum ggml_log_level level;
 
@@ -137,7 +160,11 @@ struct common_log_entry {
             }
         }
 
+#if defined(ANDROID)
+        __android_log_print(ggml_to_android_log_level(level), "llama-cpp", "%s", msg.data());
+#else
         fprintf(fcur, "%s", msg.data());
+#endif
 
         if (level == GGML_LOG_LEVEL_WARN || level == GGML_LOG_LEVEL_ERROR || level == GGML_LOG_LEVEL_DEBUG) {
             fprintf(fcur, "%s", g_col[COMMON_LOG_COL_DEFAULT]);
