@@ -13,6 +13,10 @@
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
 
+#if defined(ANDROID)
+#include <android_native_app_glue.h>
+#include <android/log.h>
+#endif
 
 struct checkpoint_callback_data;
 static checkpoint_callback_data* g_checkpoint_data = nullptr;
@@ -682,3 +686,43 @@ int main(int argc, char ** argv) {
 
     return 0;
 }
+
+#if defined(ANDROID)
+
+#define LOG_TAG "llama-cli"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+void android_main(android_app* state) {
+    (void) state;
+
+    std::filesystem::path gguf_path("/storage/emulated/0/Download/models/Qwen3_0.6B.Q8_0.gguf");
+    std::filesystem::path data_set_path("/storage/emulated/0/Download/datasets/tiny_llama_inp.txt");
+
+    if (!std::filesystem::exists(gguf_path)) {
+        LOGE("Error: The model files at %s is not accessible or does not exist.",
+             gguf_path.string().c_str());
+        return;
+    } else {
+        try {
+            size_t size = std::filesystem::file_size(gguf_path);
+            LOGI("Could read the model file at %s with %ld bytes.", gguf_path.string().c_str(), size);
+        } catch (std::filesystem::filesystem_error& e) {
+            LOGE("Failed to read the model file at %s: %s", gguf_path.string().c_str(), e.what());
+            return;
+        }
+    }
+
+    std::vector<const char*> args = {
+            "llama-finetune-lora",
+            "-m", strdup(gguf_path.string().c_str()),
+            "-f", strdup(data_set_path.string().c_str()),
+            "-ngl", "999",
+            "-c", "256",
+            "-b", "256",
+            "-ub", "256",
+    };
+
+    main(args.size(), const_cast<char **>(args.data()));
+}
+#endif
