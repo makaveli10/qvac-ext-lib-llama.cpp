@@ -1,5 +1,6 @@
 package ai.ggml.llamacpp
 
+
 import ai.ggml.llamacpp.ui.theme.LlamaAndroidTheme
 import android.app.ActivityManager
 import android.app.DownloadManager
@@ -20,7 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -136,13 +140,20 @@ fun MainCompose(
                 }
             }
         }
-        OutlinedTextField(
-            value = viewModel.message,
-            onValueChange = { viewModel.updateMessage(it) },
-            label = { Text("Message") },
-        )
         Row {
-            Button({ viewModel.send() }) { Text("Send") }
+            OutlinedTextField(
+                value = viewModel.message,
+                onValueChange = { viewModel.updateMessage(it) },
+                label = { Text("Message") },
+            )
+            Button(onClick = { viewModel.send() }) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                )
+            }
+        }
+        Row {
             Button({ viewModel.bench(8, 4, 1) }) { Text("Bench") }
             Button({ viewModel.clear() }) { Text("Clear") }
             Button(actionCopy) { Text("Copy") }
