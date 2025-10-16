@@ -5,7 +5,6 @@ import android.app.ActivityManager
 import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.net.Uri
 import android.os.Bundle
 import android.os.StrictMode
 import android.os.StrictMode.VmPolicy
@@ -29,8 +28,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.getSystemService
+import androidx.core.net.toUri
 import java.io.File
 
 class MainActivity(
@@ -73,31 +74,38 @@ class MainActivity(
         val models = listOf(
             Downloadable(
                 "Phi-2 7B (Q4_0, 1.6 GiB)",
-                Uri.parse("https://huggingface.co/ggml-org/models/resolve/main/phi-2/ggml-model-q4_0.gguf?download=true"),
+                "https://huggingface.co/ggml-org/models/resolve/main/phi-2/ggml-model-q4_0.gguf?download=true".toUri(),
                 File(extFilesDir, "phi-2-q4_0.gguf"),
             ),
             Downloadable(
                 "TinyLlama 1.1B (f16, 2.2 GiB)",
-                Uri.parse("https://huggingface.co/ggml-org/models/resolve/main/tinyllama-1.1b/ggml-model-f16.gguf?download=true"),
+                "https://huggingface.co/ggml-org/models/resolve/main/tinyllama-1.1b/ggml-model-f16.gguf?download=true".toUri(),
                 File(extFilesDir, "tinyllama-1.1-f16.gguf"),
             ),
             Downloadable(
                 "Phi 2 DPO (Q3_K_M, 1.48 GiB)",
-                Uri.parse("https://huggingface.co/TheBloke/phi-2-dpo-GGUF/resolve/main/phi-2-dpo.Q3_K_M.gguf?download=true"),
+                "https://huggingface.co/TheBloke/phi-2-dpo-GGUF/resolve/main/phi-2-dpo.Q3_K_M.gguf?download=true".toUri(),
                 File(extFilesDir, "phi-2-dpo.Q3_K_M.gguf")
             ),
         )
 
+        val actionCopy: () -> Unit = {
+            viewModel.messages.joinToString("\n").let {
+                clipboardManager.setPrimaryClip(ClipData.newPlainText("", it))
+            }
+        }
+
         setContent {
             LlamaAndroidTheme {
                 // A surface container using the 'background' color from the theme
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MainCompose(
                         viewModel,
-                        clipboardManager,
+                        actionCopy,
                         downloadManager,
                         models,
                     )
@@ -107,12 +115,11 @@ class MainActivity(
         }
     }
 }
-
 @Composable
 fun MainCompose(
     viewModel: MainViewModel,
-    clipboard: ClipboardManager,
-    dm: DownloadManager,
+    actionCopy: () -> Unit,
+    dm: DownloadManager?,
     models: List<Downloadable>
 ) {
     Column {
@@ -138,11 +145,7 @@ fun MainCompose(
             Button({ viewModel.send() }) { Text("Send") }
             Button({ viewModel.bench(8, 4, 1) }) { Text("Bench") }
             Button({ viewModel.clear() }) { Text("Clear") }
-            Button({
-                viewModel.messages.joinToString("\n").let {
-                    clipboard.setPrimaryClip(ClipData.newPlainText("", it))
-                }
-            }) { Text("Copy") }
+            Button(actionCopy) { Text("Copy") }
         }
 
         Column {
@@ -151,4 +154,35 @@ fun MainCompose(
             }
         }
     }
+}
+
+@Preview
+@Composable
+fun MainComposePreview() {
+    val viewModel = MainViewModel()
+    val actionCopy: () -> Unit = {}
+
+    val models = listOf(
+        Downloadable(
+            "Phi-2 7B (Q4_0, 1.6 GiB)",
+            "".toUri(),
+            File(""),
+        ),
+        Downloadable(
+            "TinyLlama 1.1B (f16, 2.2 GiB)",
+            "".toUri(),
+            File(""),
+        ),
+        Downloadable(
+            "Phi 2 DPO (Q3_K_M, 1.48 GiB)",
+            "".toUri(),
+            File("")
+        ),
+    )
+    MainCompose(
+        viewModel,
+        actionCopy,
+        null,
+        models
+    )
 }

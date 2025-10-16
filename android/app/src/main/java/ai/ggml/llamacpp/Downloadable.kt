@@ -31,7 +31,7 @@ data class Downloadable(val name: String, val source: Uri, val destination: File
 
         @JvmStatic
         @Composable
-        fun Button(viewModel: MainViewModel, dm: DownloadManager, item: Downloadable) {
+        fun Button(viewModel: MainViewModel, dm: DownloadManager?, item: Downloadable) {
             var status: State by remember {
                 mutableStateOf(
                     if (item.destination.exists()) Downloaded(item)
@@ -43,6 +43,11 @@ data class Downloadable(val name: String, val source: Uri, val destination: File
             val coroutineScope = rememberCoroutineScope()
 
             suspend fun waitForDownload(result: Downloading, item: Downloadable): State {
+
+                if (dm == null) {
+                    return Ready
+                }
+
                 while (true) {
                     val cursor = dm.query(DownloadManager.Query().setFilterById(result.id))
 
@@ -74,6 +79,11 @@ data class Downloadable(val name: String, val source: Uri, val destination: File
             }
 
             fun onClick() {
+
+                if (dm == null) {
+                    return
+                }
+
                 when (val s = status) {
                     is Downloaded -> {
                         viewModel.load(item.destination.path)
