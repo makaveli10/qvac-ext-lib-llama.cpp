@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,7 +53,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
 import androidx.navigation.NavHostController
@@ -217,6 +215,22 @@ fun ModelsScreen(
 }
 
 @Composable
+fun ModelsBottomSheet(
+    viewModel: MainViewModel,
+    dm: DownloadManager?,
+    models: List<Downloadable>
+) {
+    Column (
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Text("Choose model")
+        for (model in models) {
+            Downloadable.Button(viewModel, dm, model)
+        }
+    }
+}
+
+@Composable
 fun AppNavHost(
     navController: NavHostController,
     startDestination: Destination,
@@ -315,10 +329,7 @@ fun MainCompose(
                 sheetState = sheetState,
                 onDismissRequest = { showBottomSheet = false }
             ) {
-                Text(
-                    "Swipe up to open sheet. Swipe down to dismiss.",
-                    modifier = Modifier.padding(16.dp)
-                )
+                ModelsBottomSheet(viewModel, dm, models)
             }
         }
     }
@@ -327,7 +338,7 @@ fun MainCompose(
 @SuppressLint("ViewModelConstructorInComposable")
 @Preview
 @Composable
-fun MainComposePreview() {
+fun PreviewMainCompose() {
     val viewModel = MainViewModel()
 
     val models = listOf(
@@ -352,4 +363,30 @@ fun MainComposePreview() {
         null,
         models
     )
+}
+
+@SuppressLint("ViewModelConstructorInComposable")
+@Preview
+@Composable
+fun PreviewModelsBottomSheet() {
+    val viewModel = MainViewModel()
+
+    val models = listOf(
+        Downloadable(
+            "Phi-2 7B (Q4_0, 1.6 GiB)",
+            "".toUri(),
+            File(""),
+        ),
+        Downloadable(
+            "TinyLlama 1.1B (f16, 2.2 GiB)",
+            "".toUri(),
+            File(""),
+        ),
+        Downloadable(
+            "Phi 2 DPO (Q3_K_M, 1.48 GiB)",
+            "".toUri(),
+            File("")
+        ),
+    )
+    ModelsBottomSheet(viewModel, null, models)
 }
