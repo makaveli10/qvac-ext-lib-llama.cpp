@@ -142,7 +142,7 @@ enum class Destination(
 ) {
     CHAT("chat", "Chat", Icons.AutoMirrored.Filled.Send, "Chat"),
     BENCHMARK("benchmark", "Benchmark", Icons.AutoMirrored.Filled.Send, "Benchmark"),
-    MODELS("models", "Models", Icons.AutoMirrored.Filled.Send, "Models")
+    FINE_TUNING("finetune", "Fine-tune", Icons.AutoMirrored.Filled.Send, "Fine-tune")
 }
 
 @Composable
@@ -200,18 +200,10 @@ fun BenchmarkScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-fun ModelsScreen(
+fun FineTuningScreen(
     viewModel: MainViewModel,
-    dm: DownloadManager?,
-    models: List<Downloadable>
 ) {
-    Column (
-        modifier = Modifier.fillMaxSize()
-    ) {
-        for (model in models) {
-            Downloadable.Button(viewModel, dm, model)
-        }
-    }
+    Text("Fine tuning")
 }
 
 @Composable
@@ -224,6 +216,11 @@ fun ModelsBottomSheet(
         modifier = Modifier.fillMaxSize()
     ) {
         Text("Choose model")
+        Button (
+            onClick = {}
+        ) {
+            Text("Load model from file...")
+        }
         for (model in models) {
             Downloadable.Button(viewModel, dm, model)
         }
@@ -234,9 +231,7 @@ fun ModelsBottomSheet(
 fun AppNavHost(
     navController: NavHostController,
     startDestination: Destination,
-    viewModel: MainViewModel,
-    dm: DownloadManager?,
-    models: List<Downloadable>
+    viewModel: MainViewModel
 ) {
     NavHost(
         navController,
@@ -247,7 +242,7 @@ fun AppNavHost(
                 when (destination) {
                     Destination.CHAT -> ChatScreen(viewModel)
                     Destination.BENCHMARK -> BenchmarkScreen(viewModel)
-                    Destination.MODELS -> ModelsScreen(viewModel, dm, models)
+                    Destination.FINE_TUNING -> FineTuningScreen(viewModel)
                 }
             }
         }
@@ -321,7 +316,7 @@ fun MainCompose(
                 )
             }
         }
-        AppNavHost(navController, startDestination, viewModel, dm, models)
+        AppNavHost(navController, startDestination, viewModel)
 
         if (showBottomSheet) {
             ModalBottomSheet(
