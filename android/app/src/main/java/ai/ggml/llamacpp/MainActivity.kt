@@ -5,8 +5,6 @@ import ai.ggml.llamacpp.ui.theme.LlamaAndroidTheme
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.DownloadManager
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.os.Bundle
 import android.os.StrictMode
 import android.os.StrictMode.VmPolicy
@@ -16,7 +14,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -57,13 +54,10 @@ import java.io.File
 class MainActivity(
     activityManager: ActivityManager? = null,
     downloadManager: DownloadManager? = null,
-    clipboardManager: ClipboardManager? = null,
 ): ComponentActivity() {
-    private val tag: String? = this::class.simpleName
 
     private val activityManager by lazy { activityManager ?: getSystemService<ActivityManager>()!! }
     private val downloadManager by lazy { downloadManager ?: getSystemService<DownloadManager>()!! }
-    private val clipboardManager by lazy { clipboardManager ?: getSystemService<ClipboardManager>()!! }
 
     private val viewModel: MainViewModel by viewModels()
 
@@ -109,12 +103,6 @@ class MainActivity(
             ),
         )
 
-        val actionCopy: () -> Unit = {
-            viewModel.messages.joinToString("\n").let {
-                clipboardManager.setPrimaryClip(ClipData.newPlainText("", it))
-            }
-        }
-
         setContent {
             LlamaAndroidTheme {
                 // A surface container using the 'background' color from the theme
@@ -125,7 +113,6 @@ class MainActivity(
                 ) {
                     MainCompose(
                         viewModel,
-                        actionCopy,
                         downloadManager,
                         models,
                     )
@@ -133,54 +120,6 @@ class MainActivity(
 
             }
         }
-    }
-}
-@Composable
-fun ChatScreen(
-    viewModel: MainViewModel,
-    actionCopy: () -> Unit
-) {
-    Column {
-        val scrollState = rememberLazyListState()
-
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            LazyColumn(state = scrollState) {
-                items(viewModel.messages) {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodyLarge.copy(color = LocalContentColor.current),
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
-            }
-        }
-        Row (
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            OutlinedTextField(
-                value = viewModel.message,
-                onValueChange = { viewModel.updateMessage(it) },
-                label = { Text("Prompt") },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-            )
-            Button(
-                onClick = { viewModel.send() },
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                )
-            }
-        }
-        Row {
-            Button({ viewModel.bench(8, 4, 1) }) { Text("Bench") }
-            Button({ viewModel.clear() }) { Text("Clear") }
-            Button(actionCopy) { Text("Copy") }
-        }
-
-
     }
 }
 
@@ -196,12 +135,55 @@ enum class Destination(
 }
 
 @Composable
-fun BenchmarkScreen(modifier: Modifier = Modifier) {
+fun ChatScreen(
+    viewModel: MainViewModel
+) {
+    Column {
+        val scrollState = rememberLazyListState()
+
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(state = scrollState) {
+                items(viewModel.messages) {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyLarge.copy(color = LocalContentColor.current),
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        }
+        OutlinedTextField(
+            value = viewModel.message,
+            onValueChange = { viewModel.updateMessage(it) },
+            label = { Text("Prompt") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Box (
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.TopEnd
+        ) {
+            Button(
+                onClick = { viewModel.send() },
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                )
+            }
+        }
+    }
+}
+
+
+
+@Composable
+fun BenchmarkScreen(viewModel: MainViewModel) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Text("Benchmark Screen")
+        Button({ viewModel.bench(8, 4, 1) }) { Text("Bench") }
     }
 }
 
@@ -225,7 +207,6 @@ fun AppNavHost(
     navController: NavHostController,
     startDestination: Destination,
     viewModel: MainViewModel,
-    actionCopy: () -> Unit,
     dm: DownloadManager?,
     models: List<Downloadable>
 ) {
@@ -236,8 +217,8 @@ fun AppNavHost(
         Destination.entries.forEach { destination ->
             composable(destination.route) {
                 when (destination) {
-                    Destination.CHAT -> ChatScreen(viewModel, actionCopy)
-                    Destination.BENCHMARK -> BenchmarkScreen()
+                    Destination.CHAT -> ChatScreen(viewModel)
+                    Destination.BENCHMARK -> BenchmarkScreen(viewModel)
                     Destination.MODELS -> ModelsScreen(viewModel, dm, models)
                 }
             }
@@ -248,7 +229,6 @@ fun AppNavHost(
 @Composable
 fun MainCompose(
     viewModel: MainViewModel,
-    actionCopy: () -> Unit,
     dm: DownloadManager?,
     models: List<Downloadable>
 ) {
@@ -256,8 +236,8 @@ fun MainCompose(
     val startDestination = Destination.CHAT
     var selectedDestination by rememberSaveable { mutableIntStateOf(startDestination.ordinal) }
 
-    Scaffold() { contentPadding ->
-        Column() {
+    Scaffold { contentPadding ->
+        Column {
             PrimaryTabRow(selectedTabIndex = selectedDestination, modifier = Modifier.padding(contentPadding)) {
                 Destination.entries.forEachIndexed { index, destination ->
                     Tab(
@@ -276,7 +256,7 @@ fun MainCompose(
                     )
                 }
             }
-            AppNavHost(navController, startDestination, viewModel, actionCopy, dm, models)
+            AppNavHost(navController, startDestination, viewModel, dm, models)
         }
     }
 }
@@ -286,7 +266,6 @@ fun MainCompose(
 @Composable
 fun MainComposePreview() {
     val viewModel = MainViewModel()
-    val actionCopy: () -> Unit = {}
 
     val models = listOf(
         Downloadable(
@@ -307,7 +286,6 @@ fun MainComposePreview() {
     )
     MainCompose(
         viewModel,
-        actionCopy,
         null,
         models
     )
