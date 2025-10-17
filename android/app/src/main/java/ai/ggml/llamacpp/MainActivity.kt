@@ -8,6 +8,8 @@ import android.app.DownloadManager
 import android.content.Context
 import android.icu.util.TimeUnit
 import android.os.Bundle
+import android.os.HardwarePropertiesManager
+import android.os.PowerManager
 import android.os.StrictMode
 import android.os.StrictMode.VmPolicy
 import android.text.format.Formatter
@@ -30,6 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.DeviceThermostat
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -66,6 +69,7 @@ import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlinx.coroutines.delay
+import android.util.Log
 
 private fun getMemoryUsageString(context: Context): String {
     val activityManager = context.getSystemService<ActivityManager>()
@@ -79,9 +83,32 @@ private fun getMemoryUsageString(context: Context): String {
     return "${"%.1f".format(usedMemGiB)} / ${"%.1f".format(totalMemGiB)} GiB"
 }
 
+fun thermalStatusToString(status: Int): String {
+    return when (status) {
+        PowerManager.THERMAL_STATUS_NONE -> "None"
+        PowerManager.THERMAL_STATUS_LIGHT -> "Light"
+        PowerManager.THERMAL_STATUS_MODERATE -> "Moderate"
+        PowerManager.THERMAL_STATUS_SEVERE -> "Severe"
+        PowerManager.THERMAL_STATUS_CRITICAL -> "Critical"
+        PowerManager.THERMAL_STATUS_EMERGENCY -> "Emergency"
+        PowerManager.THERMAL_STATUS_SHUTDOWN -> "Shutdown"
+        else -> "Unknown ($status)"
+    }
+}
+
+private fun getThermalStatusString(context: Context): String {
+    val powerManager = context.getSystemService<PowerManager>()
+    val thermalStatus: Int = powerManager!!.currentThermalStatus
+    return thermalStatusToString(thermalStatus)
+}
+
+var tag = "llama.app"
+
 class MainActivity(
     downloadManager: DownloadManager? = null,
 ): ComponentActivity() {
+
+
 
     private val downloadManager by lazy { downloadManager ?: getSystemService<DownloadManager>()!! }
 
@@ -274,6 +301,38 @@ fun MemoryUsageText() {
     )
 }
 
+@Composable
+fun TemperatureText() {
+    val context = LocalContext.current
+    var temperatureText by remember { mutableStateOf("?") }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            try {
+                temperatureText = getThermalStatusString(context)
+            } catch (e: Exception) {
+                Log.e(tag, "Error fetching temperature: ${e.message}");
+            }
+            delay(2000)
+        }
+    }
+
+    Row (
+        verticalAlignment = Alignment.CenterVertically
+    )
+    {
+        Icon(
+            imageVector = Icons.Filled.DeviceThermostat,
+            contentDescription = "Temperature",
+        )
+        Text(
+            text = temperatureText
+        )
+    }
+}
+
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainCompose(
@@ -320,7 +379,7 @@ fun MainCompose(
                     contentAlignment = Alignment.Center
                 ) {
                 }
-                Text("35 C")
+                TemperatureText()
             }
         }
         PrimaryTabRow(selectedTabIndex = selectedDestination) {
