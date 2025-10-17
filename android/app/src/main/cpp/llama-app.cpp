@@ -83,6 +83,7 @@ extern "C"
 JNIEXPORT jlong JNICALL
 Java_ai_ggml_llamacpp_LLamaAndroid_load_1model(JNIEnv *env, jobject, jstring filename) {
     llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = 999;
 
     auto path_to_model = env->GetStringUTFChars(filename, 0);
     LOGi("Loading model from %s", path_to_model);
