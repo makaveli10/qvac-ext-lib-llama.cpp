@@ -257,11 +257,12 @@ fun ModelsBottomSheet(
         modifier = Modifier.fillMaxSize()
     ) {
         Text("Choose model")
-        Button (
-            onClick = {}
-        ) {
-            Text("Load model from file...")
-        }
+        Text("WIP: Don't close this view during download!")
+//        Button (
+//            onClick = {}
+//        ) {
+//            Text("Load model from file...")
+//        }
         for (model in models) {
             Downloadable.Button(viewModel, dm, model)
         }
