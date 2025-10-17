@@ -5,6 +5,8 @@ import ai.ggml.llamacpp.ui.theme.LlamaAndroidTheme
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.DownloadManager
+import android.content.Context
+import android.icu.util.TimeUnit
 import android.os.Bundle
 import android.os.StrictMode
 import android.os.StrictMode.VmPolicy
@@ -41,6 +43,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.content.getSystemService
@@ -61,23 +65,27 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlinx.coroutines.delay
+
+private fun getMemoryUsageString(context: Context): String {
+    val activityManager = context.getSystemService<ActivityManager>()
+    val memoryInfo = ActivityManager.MemoryInfo()
+    activityManager?.getMemoryInfo(memoryInfo)
+
+    val usedMem = memoryInfo.totalMem - memoryInfo.availMem
+    val usedMemGiB = usedMem / 1024.0 / 1024.0 / 1024.0
+    val totalMemGiB = memoryInfo.totalMem / 1024.0 / 1024.0 / 1024.0
+
+    return "${"%.1f".format(usedMemGiB)} / ${"%.1f".format(totalMemGiB)} GiB"
+}
 
 class MainActivity(
-    activityManager: ActivityManager? = null,
     downloadManager: DownloadManager? = null,
 ): ComponentActivity() {
 
-    private val activityManager by lazy { activityManager ?: getSystemService<ActivityManager>()!! }
     private val downloadManager by lazy { downloadManager ?: getSystemService<DownloadManager>()!! }
 
     private val viewModel: MainViewModel by viewModels()
-
-    // Get a MemoryInfo object for the device's current memory status.
-    private fun availableMemory(): ActivityManager.MemoryInfo {
-        return ActivityManager.MemoryInfo().also { memoryInfo ->
-            activityManager.getMemoryInfo(memoryInfo)
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,10 +96,6 @@ class MainActivity(
                 .build()
         )
 
-        val free = Formatter.formatFileSize(this, availableMemory().availMem)
-        val total = Formatter.formatFileSize(this, availableMemory().totalMem)
-
-        viewModel.log("Current memory: $free / $total")
         viewModel.log("Downloads directory: ${getExternalFilesDir(null)}")
 
         val extFilesDir = getExternalFilesDir(null)
@@ -249,6 +253,27 @@ fun AppNavHost(
     }
 }
 
+@Composable
+fun MemoryUsageText() {
+    val context = LocalContext.current
+    var memoryText by remember { mutableStateOf("? / ? GiB") }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            try {
+                memoryText = getMemoryUsageString(context)
+            } catch (e: Exception) {
+                Log.e(tag, "Error fetching temperature: ${e.message}");
+            }
+            delay(2000)
+        }
+    }
+
+    Text(
+        text = memoryText
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainCompose(
@@ -289,7 +314,7 @@ fun MainCompose(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("14 / 15 GB")
+                MemoryUsageText()
                 Box (
                     modifier = Modifier.weight(1f),
                     contentAlignment = Alignment.Center
