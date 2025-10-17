@@ -84,11 +84,12 @@ class MainViewModel(private val llamaAndroid: LLamaAndroid = LLamaAndroid.instan
 
     fun load(pathToModel: String) {
         val modelFile = File(pathToModel)
-        currentModelName = modelFile.name
+        currentModelName = "Loading..."
 
         viewModelScope.launch {
             try {
                 llamaAndroid.load(pathToModel)
+                currentModelName = modelFile.name
                 messages += "Loaded $pathToModel"
             } catch (exc: IllegalStateException) {
                 Log.e(tag, "load() failed", exc)
