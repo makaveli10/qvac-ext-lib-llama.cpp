@@ -92,26 +92,34 @@ class LLamaAndroid {
         }
     }
 
+    suspend fun doLoad(pathToModel: String) {
+        val model = load_model(pathToModel)
+        if (model == 0L)  throw IllegalStateException("load_model() failed")
+
+        val context = new_context(model)
+        if (context == 0L) throw IllegalStateException("new_context() failed")
+
+        val batch = new_batch(512, 0, 1)
+        if (batch == 0L) throw IllegalStateException("new_batch() failed")
+
+        val sampler = new_sampler()
+        if (sampler == 0L) throw IllegalStateException("new_sampler() failed")
+
+        Log.i(tag, "Loaded model $pathToModel")
+        threadLocalState.set(State.Loaded(model, context, batch, sampler))
+    }
+
     suspend fun load(pathToModel: String) {
         withContext(runLoop) {
             when (threadLocalState.get()) {
                 is State.Idle -> {
-                    val model = load_model(pathToModel)
-                    if (model == 0L)  throw IllegalStateException("load_model() failed")
-
-                    val context = new_context(model)
-                    if (context == 0L) throw IllegalStateException("new_context() failed")
-
-                    val batch = new_batch(512, 0, 1)
-                    if (batch == 0L) throw IllegalStateException("new_batch() failed")
-
-                    val sampler = new_sampler()
-                    if (sampler == 0L) throw IllegalStateException("new_sampler() failed")
-
-                    Log.i(tag, "Loaded model $pathToModel")
-                    threadLocalState.set(State.Loaded(model, context, batch, sampler))
+                    doLoad(pathToModel)
                 }
-                else -> throw IllegalStateException("Model already loaded")
+                is State.Loaded -> {
+                    unload()
+                    doLoad(pathToModel)
+                }
+                else -> throw IllegalStateException("Unexpected state to load model")
             }
         }
     }
