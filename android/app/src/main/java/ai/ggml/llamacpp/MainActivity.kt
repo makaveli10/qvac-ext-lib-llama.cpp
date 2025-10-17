@@ -129,6 +129,16 @@ class MainActivity(
 
         val models = listOf(
             Downloadable(
+                "Qwen3 1.7B (Q4_0, 1.06 GiB)",
+                "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_0.gguf?download=true".toUri(),
+                File(extFilesDir, "Qwen3-1.7B-Q4_0.gguf"),
+            ),
+            Downloadable(
+                "Qwen3 0.6B (Q8_0, 639 MiB)",
+                "https://huggingface.co/prithivMLmods/Qwen3-0.6B-GGUF/resolve/main/Qwen3_0.6B.Q8_0.gguf?download=true".toUri(),
+                File(extFilesDir, "Qwen3_0.6B.Q8_0.gguf"),
+            ),
+            Downloadable(
                 "Phi-2 7B (Q4_0, 1.6 GiB)",
                 "https://huggingface.co/ggml-org/models/resolve/main/phi-2/ggml-model-q4_0.gguf?download=true".toUri(),
                 File(extFilesDir, "phi-2-q4_0.gguf"),
