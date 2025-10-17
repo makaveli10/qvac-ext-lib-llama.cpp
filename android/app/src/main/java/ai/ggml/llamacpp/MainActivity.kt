@@ -362,7 +362,7 @@ fun MainCompose(
                 Button(
                     onClick = { showBottomSheet = true }
                 ) {
-                    Text("No Model")
+                    Text(viewModel.currentModelName)
                     Icon(
                         imageVector = Icons.Filled.ArrowDropDown,
                         contentDescription = "Send",

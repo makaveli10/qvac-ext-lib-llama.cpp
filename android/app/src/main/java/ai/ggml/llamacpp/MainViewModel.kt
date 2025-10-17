@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MainViewModel(private val llamaAndroid: LLamaAndroid = LLamaAndroid.instance()): ViewModel() {
     companion object {
@@ -21,6 +22,9 @@ class MainViewModel(private val llamaAndroid: LLamaAndroid = LLamaAndroid.instan
         private set
 
     var message by mutableStateOf("")
+        private set
+
+    var currentModelName by mutableStateOf("No Model")
         private set
 
     override fun onCleared() {
@@ -79,6 +83,9 @@ class MainViewModel(private val llamaAndroid: LLamaAndroid = LLamaAndroid.instan
     }
 
     fun load(pathToModel: String) {
+        val modelFile = File(pathToModel)
+        currentModelName = modelFile.name
+
         viewModelScope.launch {
             try {
                 llamaAndroid.load(pathToModel)
