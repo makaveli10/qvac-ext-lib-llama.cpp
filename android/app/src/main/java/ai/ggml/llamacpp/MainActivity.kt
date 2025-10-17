@@ -32,7 +32,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -161,7 +160,6 @@ fun ChatScreen(
             onValueChange = { viewModel.updateMessage(it) },
             label = { Text("Prompt") },
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
         )
         Box (
             modifier = Modifier.fillMaxWidth(),
@@ -240,32 +238,28 @@ fun MainCompose(
     val startDestination = Destination.CHAT
     var selectedDestination by rememberSaveable { mutableIntStateOf(startDestination.ordinal) }
 
-    Scaffold (
-
-    ) { contentPadding ->
-        Column (
-            modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)
-        ) {
-            PrimaryTabRow(selectedTabIndex = selectedDestination) {
-                Destination.entries.forEachIndexed { index, destination ->
-                    Tab(
-                        selected = selectedDestination == index,
-                        onClick = {
-                            navController.navigate(route = destination.route)
-                            selectedDestination = index
-                        },
-                        text = {
-                            Text(
-                                text = destination.label,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    )
-                }
+    Column (
+        modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        PrimaryTabRow(selectedTabIndex = selectedDestination) {
+            Destination.entries.forEachIndexed { index, destination ->
+                Tab(
+                    selected = selectedDestination == index,
+                    onClick = {
+                        navController.navigate(route = destination.route)
+                        selectedDestination = index
+                    },
+                    text = {
+                        Text(
+                            text = destination.label,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                )
             }
-            AppNavHost(navController, startDestination, viewModel, dm, models)
         }
+        AppNavHost(navController, startDestination, viewModel, dm, models)
     }
 }
 
