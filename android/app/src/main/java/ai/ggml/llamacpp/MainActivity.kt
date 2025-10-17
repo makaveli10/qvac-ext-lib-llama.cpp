@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -141,7 +142,9 @@ enum class Destination(
 fun ChatScreen(
     viewModel: MainViewModel
 ) {
-    Column {
+    Column (
+        modifier = Modifier.imePadding()
+    ) {
         val scrollState = rememberLazyListState()
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
