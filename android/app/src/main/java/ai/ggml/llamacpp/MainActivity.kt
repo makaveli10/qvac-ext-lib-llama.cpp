@@ -2,6 +2,7 @@ package ai.ggml.llamacpp
 
 
 import ai.ggml.llamacpp.ui.theme.LlamaAndroidTheme
+import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.DownloadManager
 import android.content.ClipData
@@ -29,15 +30,28 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import java.io.File
 
 class MainActivity(
@@ -122,16 +136,14 @@ class MainActivity(
     }
 }
 @Composable
-fun MainCompose(
+fun ChatScreen(
     viewModel: MainViewModel,
-    actionCopy: () -> Unit,
-    dm: DownloadManager?,
-    models: List<Downloadable>
+    actionCopy: () -> Unit
 ) {
     Column {
         val scrollState = rememberLazyListState()
 
-        Box(modifier = Modifier.weight(1f)) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(state = scrollState) {
                 items(viewModel.messages) {
                     Text(
@@ -168,14 +180,108 @@ fun MainCompose(
             Button(actionCopy) { Text("Copy") }
         }
 
-        Column {
-            for (model in models) {
-                Downloadable.Button(viewModel, dm, model)
+
+    }
+}
+
+enum class Destination(
+    val route: String,
+    val label: String,
+    val icon: ImageVector,
+    val contentDescription: String
+) {
+    CHAT("chat", "Chat", Icons.AutoMirrored.Filled.Send, "Chat"),
+    BENCHMARK("benchmark", "Benchmark", Icons.AutoMirrored.Filled.Send, "Benchmark"),
+    MODELS("models", "Models", Icons.AutoMirrored.Filled.Send, "Models")
+}
+
+@Composable
+fun BenchmarkScreen(modifier: Modifier = Modifier) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text("Benchmark Screen")
+    }
+}
+
+@Composable
+fun ModelsScreen(
+    viewModel: MainViewModel,
+    dm: DownloadManager?,
+    models: List<Downloadable>
+) {
+    Column (
+        modifier = Modifier.fillMaxSize()
+    ) {
+        for (model in models) {
+            Downloadable.Button(viewModel, dm, model)
+        }
+    }
+}
+
+@Composable
+fun AppNavHost(
+    navController: NavHostController,
+    startDestination: Destination,
+    viewModel: MainViewModel,
+    actionCopy: () -> Unit,
+    dm: DownloadManager?,
+    models: List<Downloadable>
+) {
+    NavHost(
+        navController,
+        startDestination = startDestination.route
+    ) {
+        Destination.entries.forEach { destination ->
+            composable(destination.route) {
+                when (destination) {
+                    Destination.CHAT -> ChatScreen(viewModel, actionCopy)
+                    Destination.BENCHMARK -> BenchmarkScreen()
+                    Destination.MODELS -> ModelsScreen(viewModel, dm, models)
+                }
             }
         }
     }
 }
 
+@Composable
+fun MainCompose(
+    viewModel: MainViewModel,
+    actionCopy: () -> Unit,
+    dm: DownloadManager?,
+    models: List<Downloadable>
+) {
+    val navController = rememberNavController()
+    val startDestination = Destination.CHAT
+    var selectedDestination by rememberSaveable { mutableIntStateOf(startDestination.ordinal) }
+
+    Scaffold() { contentPadding ->
+        Column() {
+            PrimaryTabRow(selectedTabIndex = selectedDestination, modifier = Modifier.padding(contentPadding)) {
+                Destination.entries.forEachIndexed { index, destination ->
+                    Tab(
+                        selected = selectedDestination == index,
+                        onClick = {
+                            navController.navigate(route = destination.route)
+                            selectedDestination = index
+                        },
+                        text = {
+                            Text(
+                                text = destination.label,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    )
+                }
+            }
+            AppNavHost(navController, startDestination, viewModel, actionCopy, dm, models)
+        }
+    }
+}
+
+@SuppressLint("ViewModelConstructorInComposable")
 @Preview
 @Composable
 fun MainComposePreview() {

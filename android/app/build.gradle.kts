@@ -82,6 +82,11 @@ dependencies {
     implementation(libs.androidx.material.icons.core)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.foundation.layout)
+    implementation(libs.androidx.navigation.safe.args.generator) {
+        exclude(group = "xpp3", module = "xpp3")
+    }
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.runtime.saveable)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
