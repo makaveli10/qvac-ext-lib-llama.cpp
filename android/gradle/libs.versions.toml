@@ -19,6 +19,7 @@ foundationLayout = "1.9.3"
 navigationSafeArgsGenerator = "2.9.5"
 navigationCompose = "2.9.5"
 runtimeSaveable = "1.9.3"
+uiGraphics = "1.9.3"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -40,6 +41,7 @@ androidx-foundation-layout = { group = "androidx.compose.foundation", name = "fo
 androidx-navigation-safe-args-generator = { group = "androidx.navigation", name = "navigation-safe-args-generator", version.ref = "navigationSafeArgsGenerator" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-runtime-saveable = { group = "androidx.compose.runtime", name = "runtime-saveable", version.ref = "runtimeSaveable" }
+androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "uiGraphics" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
