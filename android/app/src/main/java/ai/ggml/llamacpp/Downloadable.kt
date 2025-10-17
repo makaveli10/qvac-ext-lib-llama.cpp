@@ -86,6 +86,7 @@ data class Downloadable(val name: String, val source: Uri, val destination: File
 
                 when (val s = status) {
                     is Downloaded -> {
+                        viewModel.log("Loading model ${item.name}...")
                         viewModel.load(item.destination.path)
                     }
 
