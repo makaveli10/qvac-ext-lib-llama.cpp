@@ -139,6 +139,11 @@ class MainActivity(
                 File(extFilesDir, "Qwen3_0.6B.Q8_0.gguf"),
             ),
             Downloadable(
+                "Gemma 3 1B (Q4_0, 722 MiB)",
+                "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_0.gguf?download=true".toUri(),
+                File(extFilesDir, "gemma-3-1b-it-Q4_0.gguf"),
+            ),
+            Downloadable(
                 "Phi-2 7B (Q4_0, 1.6 GiB)",
                 "https://huggingface.co/ggml-org/models/resolve/main/phi-2/ggml-model-q4_0.gguf?download=true".toUri(),
                 File(extFilesDir, "phi-2-q4_0.gguf"),
