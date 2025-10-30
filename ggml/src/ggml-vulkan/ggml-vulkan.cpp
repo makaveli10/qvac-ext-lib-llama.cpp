@@ -3807,8 +3807,11 @@ static vk_device ggml_vk_get_device(size_t idx) {
             device->architecture == vk_device_architecture::QUALCOMM_ADRENO) {
             // despite being able to allocate large buffers, using them for SSBOs cause problems
             // on Adreno GPUs, so we need to tile larger operations.
+            GGML_LOG_WARN("Setting tiling threshold to 0x%lX for QUALCOMM_ADRENO\n",
+                          descriptor_buffer_props.descriptorBufferAddressSpaceSize);
             device->tiling_threshold = descriptor_buffer_props.descriptorBufferAddressSpaceSize;
         }
+
         device->uma = device->properties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu;
         if (sm_builtins) {
             device->shader_core_count = sm_props.shaderSMCount;
