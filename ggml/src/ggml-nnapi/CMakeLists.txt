@@ -1,0 +1,6 @@
+if (ANDROID)
+    ggml_add_backend_library(ggml-nnapi ggml-nnapi.cpp)
+    target_link_libraries(ggml-nnapi PRIVATE neuralnetworks android)
+else()
+    message(FATAL_ERROR "NNAPI is only available on Android")
+endif()

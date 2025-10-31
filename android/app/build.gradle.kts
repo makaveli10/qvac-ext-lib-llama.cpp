@@ -50,6 +50,7 @@ android {
                     "-DGGML_LLAMAFILE=OFF",
                     "-DLLAMA_CURL=OFF",
                     "-DGGML_VULKAN=1",
+                    "-DGGML_NNAPI=ON",
                     "-DLLAMA_BUILD_TESTS=1", // test need tools
                     "-DLLAMA_BUILD_TOOLS=1",
                     "-DLLAMA_BUILD_EXAMPLES=1",

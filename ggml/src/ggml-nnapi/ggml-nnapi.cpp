@@ -1,0 +1,920 @@
+#include "ggml-impl.h"
+#include "ggml-nnapi.h"
+#include "ggml-backend-impl.h"
+
+#include <future>
+#include <vector>
+#include <cstring>
+
+#include <android/NeuralNetworks.h>
+#include <android/sharedmem.h>
+#include <sys/mman.h>
+
+static OperandCode ggml_to_nnapi_type(ggml_type gt) {
+    switch(gt) {
+        case GGML_TYPE_F32:
+            return ANEURALNETWORKS_TENSOR_FLOAT32;
+        case GGML_TYPE_F16:
+            return ANEURALNETWORKS_TENSOR_FLOAT16;
+        case GGML_TYPE_Q8_0:
+            return ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED;
+        default:
+            GGML_LOG_ERROR("Unsupported type %s", ggml_type_name(gt));
+            assert(false);
+    }
+    return ANEURALNETWORKS_TENSOR_FLOAT32;
+}
+
+static std::pair<int, ANeuralNetworksMemory*> create_shared_memory(
+        const char* name, uint32_t num_elements, size_t element_size, int prot) {
+    int fd = ASharedMemory_create(name, num_elements * element_size);
+    ANeuralNetworksMemory* memory = nullptr;
+    int32_t status = ANeuralNetworksMemory_createFromFd(num_elements * element_size,
+                                                        prot, fd, 0, &memory);
+    if (status != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksMemory_createFromFd failed for %s", name);
+        close(fd);
+        return {-1, nullptr};
+    }
+
+    return {fd, memory};
+}
+
+
+class nnapi_tensor {
+public:
+    std::vector<uint32_t> dimensions;
+    ANeuralNetworksOperandType op_type = {};
+    ANeuralNetworksMemory* memory = nullptr;
+    int fd = -1;
+    int64_t nels = 0;
+    size_t size = 0;
+
+    nnapi_tensor() = default;
+
+    nnapi_tensor(const ggml_tensor * tensor, size_t element_size,
+                 bool flip_dimensions=false, bool is_output=false) {
+        if (flip_dimensions) {
+            dimensions = {
+                    static_cast<uint32_t>(tensor->ne[1]),
+                    static_cast<uint32_t>(tensor->ne[0]),
+            };
+        } else {
+            dimensions = {
+                    static_cast<uint32_t>(tensor->ne[0]),
+                    static_cast<uint32_t>(tensor->ne[1]),
+            };
+        }
+
+        op_type = {
+            .type = ggml_to_nnapi_type(tensor->type),
+            .dimensionCount = static_cast<uint32_t>(dimensions.size()),
+            .dimensions = dimensions.data(),
+            .scale = 0.0f,
+            .zeroPoint = 0,
+        };
+
+        if (op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            op_type.scale = 1.0f;
+        }
+
+        nels = ggml_nelements(tensor);
+
+        size = nels * element_size;
+
+        int prot = PROT_READ;
+        if (is_output) {
+            prot |= PROT_WRITE;
+        }
+        std::tie(fd, memory) = create_shared_memory(tensor->name,
+                                                    static_cast<uint32_t>(nels),
+                                                    element_size, prot);
+    }
+    void write(const ggml_tensor * tensor) const {
+        switch(tensor->type) {
+            case GGML_TYPE_F32:
+            case GGML_TYPE_F16:
+            {
+                void* map = mmap(nullptr, size, PROT_WRITE, MAP_SHARED, fd, 0);
+                memcpy(map, tensor->data, size);
+                munmap(map, size);
+                break;
+            }
+            default:
+                GGML_LOG_ERROR("Unsupported type %s", ggml_type_name(tensor->type));
+                assert(false);
+        }
+    }
+
+    void write_transposed(const ggml_tensor * tensor) const {
+        if (!(tensor->type == GGML_TYPE_F16 ||
+              tensor->type == GGML_TYPE_F32)) {
+            GGML_LOG_ERROR("Unsupported type %s", ggml_type_name(tensor->type));
+            assert(false);
+        }
+
+        uint32_t index_linear = 0;
+        const uint8_t *data = reinterpret_cast<uint8_t*>(tensor->data);
+        void* map = mmap(nullptr, size, PROT_WRITE, MAP_SHARED, fd, 0);
+
+        for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+            for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
+                size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
+                if (tensor->type == GGML_TYPE_F32) {
+                    reinterpret_cast<float*>(map)[index_linear] = *reinterpret_cast<const float *>(&data[index_transposed]);
+                } else if (tensor->type == GGML_TYPE_F16) {
+                    reinterpret_cast<_Float16*>(map)[index_linear] = *reinterpret_cast<const _Float16 *>(&data[index_transposed]);
+                }
+                index_linear++;
+            }
+        }
+        munmap(map, size);
+    }
+
+    void read_transposed(ggml_tensor * tensor) const {
+        // output is always f32 in the tests?
+        if (tensor->type != GGML_TYPE_F32) {
+            GGML_LOG_ERROR("Unsupported output tensor type %s", ggml_type_name(tensor->type));
+            return;
+        }
+
+        if (op_type.type != ANEURALNETWORKS_TENSOR_FLOAT32 &&
+            op_type.type != ANEURALNETWORKS_TENSOR_FLOAT16) {
+            GGML_LOG_ERROR("Unsupported type %d", op_type.type);
+            return;
+        }
+
+        uint32_t index_linear = 0;
+        auto *dst_data = reinterpret_cast<uint8_t*>(tensor->data);
+        void *map = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+
+        for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+            for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
+                size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
+                if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT32) {
+                    *reinterpret_cast<float *>(&dst_data[index_transposed]) = reinterpret_cast<float*>(map)[index_linear];
+                } else if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT16) {
+                    *reinterpret_cast<float *>(&dst_data[index_transposed]) = reinterpret_cast<_Float16*>(map)[index_linear];
+                }
+                index_linear++;
+            }
+        }
+        munmap(map, size);
+    }
+};
+
+struct nnapi_pipeline {
+    ANeuralNetworksModel* model = nullptr;
+    ANeuralNetworksCompilation* compilation = nullptr;
+
+    nnapi_tensor src0;
+    nnapi_tensor src1;
+    nnapi_tensor dst;
+};
+
+struct ggml_backend_nnapi_context {
+    std::vector<ANeuralNetworksDevice*> devices;
+    nnapi_pipeline pipeline;
+};
+
+#define ENUM_TO_STR(r)                                                         \
+  case r:                                                                      \
+    return #r
+
+static const char *
+feature_leveL_code_str (FeatureLevelCode code)
+{
+    switch (code)
+    {
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_1);
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_2);
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_3);
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_4);
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_5);
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_6);
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_7);
+        ENUM_TO_STR(ANEURALNETWORKS_FEATURE_LEVEL_8);
+        default:
+            return "UNKNOWN FEATURE LEVEL";
+    }
+}
+
+static const char *
+device_type_code_str (DeviceTypeCode code)
+{
+    switch (code)
+    {
+        ENUM_TO_STR(ANEURALNETWORKS_DEVICE_UNKNOWN);
+        ENUM_TO_STR(ANEURALNETWORKS_DEVICE_OTHER);
+        ENUM_TO_STR(ANEURALNETWORKS_DEVICE_CPU);
+        ENUM_TO_STR(ANEURALNETWORKS_DEVICE_GPU);
+        ENUM_TO_STR(ANEURALNETWORKS_DEVICE_ACCELERATOR);
+        default:
+            return "UNKNOWN DEVICE TYPE";
+    }
+}
+
+static const char *
+operand_code_str (OperandCode code)
+{
+    switch (code)
+    {
+        ENUM_TO_STR(ANEURALNETWORKS_TENSOR_FLOAT16);
+        ENUM_TO_STR(ANEURALNETWORKS_TENSOR_FLOAT32);
+        ENUM_TO_STR(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
+        ENUM_TO_STR(ANEURALNETWORKS_TENSOR_INT32);
+        default:
+            return "UNKNOWN OPERAND CODE";
+    }
+}
+
+static void print_runtime_infos(ggml_backend_nnapi_context * ctx) {
+    auto runtime_feature_level = static_cast<FeatureLevelCode>(ANeuralNetworks_getRuntimeFeatureLevel());
+    GGML_LOG_INFO("Runtime feature level: %s", feature_leveL_code_str(runtime_feature_level));
+
+    uint32_t num_devices = 0;
+    int ret = ANeuralNetworks_getDeviceCount(&num_devices);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("Failed to get device count.");
+        return;
+    }
+
+    GGML_LOG_INFO("Have %d devices:", num_devices);
+
+    for (uint32_t i = 0; i < num_devices; i++) {
+        ANeuralNetworksDevice* device;
+        ret = ANeuralNetworks_getDevice(i, &device);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("Failed to get device %d", i);
+            return;
+        }
+
+        ctx->devices.push_back(device);
+
+        int64_t device_feature_level_int;
+        ret = ANeuralNetworksDevice_getFeatureLevel(device, &device_feature_level_int);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("Failed to ANeuralNetworksDevice_getFeatureLevel for device %d", i);
+            return;
+        }
+        auto device_feature_level = static_cast<FeatureLevelCode>(device_feature_level_int);
+
+        const char* version;
+        ret = ANeuralNetworksDevice_getVersion(device, &version);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("Failed to ANeuralNetworksDevice_getVersion for device %d", i);
+            return;
+        }
+
+        int32_t device_type_int;
+        ret = ANeuralNetworksDevice_getType(device, &device_type_int);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("Failed to ANeuralNetworksDevice_getType for device %d", i);
+            return;
+        }
+        auto device_type = static_cast<DeviceTypeCode>(device_type_int);
+
+        const char* name;
+        ret = ANeuralNetworksDevice_getName(device, &name);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("Failed to ANeuralNetworksDevice_getName for device %d", i);
+            return;
+        }
+        GGML_LOG_INFO("Device %d: %s", i, name);
+        GGML_LOG_INFO("       Type:    %s", device_type_code_str(device_type));
+        GGML_LOG_INFO("       Version: %s", version);
+        GGML_LOG_INFO("       Level:   %s", feature_leveL_code_str(device_feature_level));
+    }
+}
+
+static void print_tensor_info(const char* name, const ggml_tensor * tensor) {
+
+    int64_t nels = ggml_nelements(tensor);
+    size_t row_size = ggml_row_size(tensor->type, nels);
+    int64_t nrows = ggml_nrows(tensor);
+    size_t nbytes = ggml_nbytes(tensor);
+
+    GGML_LOG_ERROR("%s (%s): op %s (%s) %ldx%ldx%ldx%ld = %ld",
+                   name, tensor->name, ggml_op_name(tensor->op), ggml_op_symbol(tensor->op),
+                   tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->ne[3], nels);
+    GGML_LOG_ERROR("row_size %ld bytes nrows %ld nbytes %ld", row_size, nrows, nbytes);
+    GGML_LOG_ERROR("+ type %s (%ld bytes) (%ld bytes per blck)",
+                   ggml_type_name(tensor->type),
+                   ggml_type_size(tensor->type),
+                   ggml_blck_size(tensor->type));
+    for (uint32_t i = 0; i < GGML_MAX_DIMS; i++) {
+        GGML_LOG_ERROR("+ %d: elements %ld stride %ld bytes",
+                       i, tensor->ne[i], tensor->nb[i]);
+    }
+}
+
+static void print_ggml_f32_tensor(const ggml_tensor * tensor) {
+    std::stringstream ss;
+    uint32_t i = 0;
+
+    for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
+        for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+            const void *x = (char *) tensor->data
+                    + i00 * tensor->nb[0]
+                    + i01 * tensor->nb[1];
+            const auto *the_float = static_cast<const float*>(x);
+            ss << *the_float << " ";
+            i++;
+            if (i % tensor->ne[0] == 0) {
+                GGML_LOG_INFO("%s", ss.str().c_str());
+                ss.str("");
+                ss.clear();
+            }
+        }
+    }
+}
+
+static bool build_mat_mul_model(ANeuralNetworksModel** model,
+                                ANeuralNetworksOperandType *in_tensor0_type,
+                                ANeuralNetworksOperandType *in_tensor1_type,
+                                ANeuralNetworksOperandType *out_tensor_type) {
+    int ret = ANeuralNetworksModel_create(model);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_create failed");
+        return false;
+    }
+
+    uint32_t op_idx = 0;
+
+    ANeuralNetworksOperandType scalarBoolType{
+            .type = ANEURALNETWORKS_BOOL,
+            .dimensionCount = 0,
+            .dimensions = nullptr,
+            .scale = 0.0f,
+            .zeroPoint = 0,
+    };
+
+    ret = ANeuralNetworksModel_addOperand(*model, &scalarBoolType);
+    uint32_t adj_x = op_idx++;
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_addOperand failed for operand (%d)",
+                       adj_x);
+        return false;
+    }
+    bool adj_x_value = false;
+    ret = ANeuralNetworksModel_setOperandValue(
+            *model, (int32_t) adj_x, &adj_x_value,
+            sizeof(adj_x_value));
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_setOperandValue failed for operand (%d)",
+                       adj_x);
+        return false;
+    }
+
+    ret = ANeuralNetworksModel_addOperand(*model, &scalarBoolType);
+    uint32_t adj_y = op_idx++;
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_addOperand failed for operand (%d)",
+                       adj_y);
+        return false;
+    }
+    bool adj_y_value = false;
+    ret = ANeuralNetworksModel_setOperandValue(
+            *model, (int32_t) adj_y, &adj_y_value,
+            sizeof(adj_y_value));
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_setOperandValue failed for operand (%d)",
+                       adj_y);
+        return false;
+    }
+
+    uint32_t tensor0_in = op_idx++;
+
+    ret = ANeuralNetworksModel_addOperand(*model, in_tensor0_type);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("addOperand failed for tensor0_in operand of type %s",
+                       operand_code_str((OperandCode)in_tensor0_type->type));
+        return false;
+    }
+
+    uint32_t tensor1_in = op_idx++;
+
+    ret = ANeuralNetworksModel_addOperand(*model, in_tensor1_type);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("addOperand failed for tensor1_in operand of type %s",
+                       operand_code_str((OperandCode)in_tensor1_type->type));
+        return false;
+    }
+
+    uint32_t tensor_out = op_idx++;
+
+    ret = ANeuralNetworksModel_addOperand(*model, out_tensor_type);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("addOperand failed for tensor_out operand of type %s",
+                       operand_code_str((OperandCode)out_tensor_type->type));
+        return false;
+    }
+
+    // Add the BATCH_MATMUL operation.
+    std::vector<uint32_t> mulInputOperands = {
+            tensor0_in,
+            tensor1_in,
+            adj_x,
+            adj_y
+    };
+    ret = ANeuralNetworksModel_addOperation(
+            *model, ANEURALNETWORKS_BATCH_MATMUL, mulInputOperands.size(),
+            mulInputOperands.data(), 1, &tensor_out);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_addOperation failed for BATCH_MATMUL");
+        return false;
+    }
+
+    std::vector<uint32_t> modelInputs = {
+            tensor0_in,
+            tensor1_in,
+    };
+    std::vector<uint32_t> modelOutputs = {
+            tensor_out,
+    };
+    ret = ANeuralNetworksModel_identifyInputsAndOutputs(
+            *model, modelInputs.size(), modelInputs.data(), modelOutputs.size(),
+            modelOutputs.data());
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_identifyInputsAndOutputs failed");
+        return false;
+    }
+
+    ret = ANeuralNetworksModel_finish(*model);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksModel_finish failed");
+        return false;
+    }
+
+    return true;
+}
+
+static void check_device_support_for_model(ggml_backend_nnapi_context * ctx,
+                                           ANeuralNetworksModel* model) {
+    for (ANeuralNetworksDevice* device : ctx->devices) {
+
+        const char* name;
+        int ret = ANeuralNetworksDevice_getName(device, &name);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("Failed to ANeuralNetworksDevice_getName for device %p", (void*) device);
+            return;
+        }
+
+        bool is_first_op_supported = false;
+
+        ret = ANeuralNetworksModel_getSupportedOperationsForDevices(model, &device,
+                                                                    1, &is_first_op_supported);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("ANeuralNetworksModel_getSupportedOperationsForDevices failed");
+            return;
+        }
+
+        GGML_LOG_INFO("%s: supported %d", name, is_first_op_supported);
+    }
+}
+
+static bool compile_model(ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation) {
+    // ANeuralNetworksCompilation_createForDevices
+    int ret = ANeuralNetworksCompilation_create(model, compilation);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksCompilation_create failed");
+        return false;
+    }
+
+    ret = ANeuralNetworksCompilation_setPreference(
+            *compilation, ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksCompilation_setPreference failed");
+        return false;
+    }
+
+    ret = ANeuralNetworksCompilation_finish(*compilation);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksCompilation_finish failed");
+        return false;
+    }
+
+    return true;
+}
+
+static bool dispatch_model(ANeuralNetworksCompilation* compilation,
+                           nnapi_tensor *in_tensor0,
+                           nnapi_tensor *in_tensor1,
+                           nnapi_tensor *out_tensor) {
+    ANeuralNetworksEvent* event = nullptr;
+    ANeuralNetworksExecution* execution;
+    int ret = ANeuralNetworksExecution_create(compilation, &execution);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksExecution_create failed");
+        return false;
+    }
+
+    ret = ANeuralNetworksExecution_setInputFromMemory(
+            execution, 0, &in_tensor0->op_type, in_tensor0->memory, 0, in_tensor0->size);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksExecution_setInputFromMemory failed for in_tensor0");
+        return false;
+    }
+
+    ret = ANeuralNetworksExecution_setInputFromMemory(
+            execution, 1, &in_tensor1->op_type, in_tensor1->memory, 0, in_tensor1->size);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksExecution_setInputFromMemory failed for in_tensor1");
+        return false;
+    }
+
+    ret = ANeuralNetworksExecution_setOutputFromMemory(
+            execution, 0, &out_tensor->op_type, out_tensor->memory, 0, out_tensor->size);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksExecution_setOutputFromMemory failed for out_tensor0");
+        return false;
+    }
+
+    const ANeuralNetworksEvent* const* dependencies = nullptr;
+    uint32_t numDependencies = 0;
+
+    ret = ANeuralNetworksExecution_startComputeWithDependencies(
+            execution, dependencies, numDependencies, 0, &event);
+    if (ret != ANEURALNETWORKS_NO_ERROR) {
+        GGML_LOG_ERROR("ANeuralNetworksExecution_compute failed");
+        return false;
+    }
+
+    ANeuralNetworksEvent_wait(event);
+    ANeuralNetworksExecution_free(execution);
+    ANeuralNetworksEvent_free(event);
+
+    return true;
+}
+
+static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct ggml_tensor * dst) {
+    const struct ggml_tensor * src0 = dst->src[0];
+    const struct ggml_tensor * src1 = dst->src[1];
+
+    // TODO: do this even earlier
+    if (ctx->pipeline.model == nullptr) {
+        ctx->pipeline.src0 = nnapi_tensor(src0, ggml_type_size(src0->type), true, false);
+        ctx->pipeline.src1 = nnapi_tensor(src1, ggml_type_size(src1->type), false, false);
+
+        // Set NNAPI output dtype to match input, we will be converting to f32 later
+        ctx->pipeline.dst = nnapi_tensor(dst, ggml_type_size(src0->type), false, true);
+        ctx->pipeline.dst.op_type.type = ggml_to_nnapi_type(src0->type);
+
+        if (!build_mat_mul_model(&ctx->pipeline.model,
+                                 &ctx->pipeline.src0.op_type,
+                                 &ctx->pipeline.src1.op_type,
+                                 &ctx->pipeline.dst.op_type)) {
+            GGML_LOG_ERROR("Failed to build the mat mul model");
+            return;
+        }
+
+        if (!compile_model(ctx->pipeline.model, &ctx->pipeline.compilation)) {
+            GGML_LOG_ERROR("Failed to compile model.");
+            return;
+        }
+    }
+
+    ctx->pipeline.src0.write(src0);
+    ctx->pipeline.src1.write_transposed(src1);
+
+    if (!dispatch_model(ctx->pipeline.compilation,
+                        &ctx->pipeline.src0,
+                        &ctx->pipeline.src1,
+                        &ctx->pipeline.dst)) {
+        GGML_LOG_ERROR("Failed to dispatch model.");
+        return;
+    }
+
+    ctx->pipeline.dst.read_transposed(dst);
+}
+
+
+static void print_device_model_support(ggml_backend_nnapi_context * ctx) {
+    static constexpr uint32_t dimension_length = 4;
+    static constexpr uint32_t tensor_size = dimension_length * dimension_length;
+
+    uint32_t dimensions[] = {dimension_length, dimension_length};
+
+    // supported types for matmul
+    std::vector<OperandCode> types_to_test = {
+            ANEURALNETWORKS_TENSOR_FLOAT16,
+            ANEURALNETWORKS_TENSOR_FLOAT32,
+            ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED,
+            ANEURALNETWORKS_TENSOR_INT32
+    };
+
+    for (OperandCode tensor_type_code : types_to_test) {
+        ANeuralNetworksOperandType tensor_type = {
+                .type = tensor_type_code,
+                .dimensionCount = sizeof(dimensions) / sizeof(dimensions[0]),
+                .dimensions = dimensions,
+                .scale = 0.0f,
+                .zeroPoint = 0,
+        };
+
+        if (tensor_type_code == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            tensor_type.scale = 1.0f;
+        }
+
+        ANeuralNetworksModel* model = nullptr;
+        if (!build_mat_mul_model(&model, &tensor_type, &tensor_type, &tensor_type)) {
+            GGML_LOG_ERROR("Failed to build the mat mul model for type %s",
+                           operand_code_str(tensor_type_code));
+            continue;
+        }
+
+        GGML_LOG_INFO("Testing model type %s", operand_code_str(tensor_type_code));
+        check_device_support_for_model(ctx, model);
+        ANeuralNetworksModel_free(model);
+    }
+}
+
+// backend interface
+static const char * ggml_backend_nnapi_get_name(ggml_backend_t backend) {
+    return "NNAPI";
+
+    GGML_UNUSED(backend);
+}
+
+static void ggml_backend_nnapi_free(ggml_backend_t backend) {
+    auto * ctx = reinterpret_cast<ggml_backend_nnapi_context *>(backend->context);
+
+    ANeuralNetworksMemory_free(ctx->pipeline.src0.memory);
+    ANeuralNetworksMemory_free(ctx->pipeline.src1.memory);
+    ANeuralNetworksMemory_free(ctx->pipeline.dst.memory);
+
+    close(ctx->pipeline.src0.fd);
+    close(ctx->pipeline.src1.fd);
+    close(ctx->pipeline.dst.fd);
+
+    ANeuralNetworksCompilation_free(ctx->pipeline.compilation);
+    ANeuralNetworksModel_free(ctx->pipeline.model);
+
+    delete ctx;
+    delete backend;
+}
+
+static enum ggml_status ggml_backend_nnapi_graph_compute(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
+    auto * ctx = reinterpret_cast<ggml_backend_nnapi_context *>(backend->context);
+
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        struct ggml_tensor * node = cgraph->nodes[i];
+
+        switch (node->op) {
+            case GGML_OP_MUL_MAT:
+                ggml_backend_nnapi_mul_mat(ctx, node);
+                break;
+            case GGML_OP_OUT_PROD:
+            case GGML_OP_NONE:
+            case GGML_OP_RESHAPE:
+            case GGML_OP_VIEW:
+            case GGML_OP_PERMUTE:
+            case GGML_OP_TRANSPOSE:
+                break;
+            default:
+                GGML_ABORT("%s: unsupported op %s\n", __func__, ggml_op_desc(node));
+        }
+    }
+
+    return GGML_STATUS_SUCCESS;
+
+    GGML_UNUSED(backend);
+}
+
+static struct ggml_backend_i nnapi_backend_iface = {
+        .get_name           = ggml_backend_nnapi_get_name,
+        .free               = ggml_backend_nnapi_free,
+        .set_tensor_async   = nullptr,
+        .get_tensor_async   = nullptr,
+        .cpy_tensor_async   = nullptr,
+        .synchronize        = nullptr,
+        .graph_plan_create  = nullptr,
+        .graph_plan_free    = nullptr,
+        .graph_plan_update  = nullptr,
+        .graph_plan_compute = nullptr,
+        .graph_compute      = ggml_backend_nnapi_graph_compute,
+        .event_record       = nullptr,
+        .event_wait         = nullptr,
+        .optimize_graph     = nullptr,
+};
+
+static ggml_guid_t ggml_backend_nnapi_guid() {
+    static ggml_guid guid = { 0xde, 0xad, 0xbe, 0xef,
+                              0xde, 0xad, 0xbe, 0xef,
+                              0xde, 0xad, 0xbe, 0xef,
+                              0xde, 0xad, 0xbe, 0xef };
+    return &guid;
+}
+
+ggml_backend_t ggml_backend_nnapi_init(void) {
+    auto * ctx = new ggml_backend_nnapi_context;
+
+    auto * backend = new ggml_backend {
+        .guid    = ggml_backend_nnapi_guid(),
+        .iface   = nnapi_backend_iface,
+        .device  = ggml_backend_reg_dev_get(ggml_backend_nnapi_reg(), 0),
+        .context = ctx,
+    };
+
+//    print_runtime_infos(ctx);
+//    print_device_model_support(ctx);
+
+    return backend;
+}
+
+bool ggml_backend_is_nnapi(ggml_backend_t backend) {
+    return backend != nullptr && ggml_guid_matches(backend->guid, ggml_backend_nnapi_guid());
+}
+
+void ggml_backend_nnapi_set_n_threads(ggml_backend_t backend_nnapi, int n_threads) {
+    GGML_ASSERT(ggml_backend_is_nnapi(backend_nnapi));
+    GGML_UNUSED(n_threads);
+}
+
+// device interface
+static const char * ggml_backend_nnapi_device_get_name(ggml_backend_dev_t dev) {
+    return "NNAPI Device";
+
+    GGML_UNUSED(dev);
+}
+
+static const char * ggml_backend_nnapi_device_get_description(ggml_backend_dev_t dev) {
+    return "NNAPI Device Description";
+
+    GGML_UNUSED(dev);
+}
+
+static void ggml_backend_nnapi_device_get_memory(ggml_backend_dev_t dev, size_t * free, size_t * total) {
+    // TODO
+    *free = 0;
+    *total = 0;
+
+    GGML_UNUSED(dev);
+}
+
+static enum ggml_backend_dev_type ggml_backend_nnapi_device_get_type(ggml_backend_dev_t dev) {
+    return GGML_BACKEND_DEVICE_TYPE_ACCEL;
+
+    GGML_UNUSED(dev);
+}
+
+static void ggml_backend_nnapi_device_get_props(ggml_backend_dev_t dev, struct ggml_backend_dev_props * props) {
+    props->name        = ggml_backend_nnapi_device_get_name(dev);
+    props->description = ggml_backend_nnapi_device_get_description(dev);
+    props->type        = ggml_backend_nnapi_device_get_type(dev);
+    ggml_backend_nnapi_device_get_memory(dev, &props->memory_free, &props->memory_total);
+    props->caps = {
+        .async                = false,
+        .host_buffer          = false,
+        .buffer_from_host_ptr = true,
+        .events               = false,
+    };
+}
+
+static ggml_backend_t ggml_backend_nnapi_device_init_backend(ggml_backend_dev_t dev, const char * params) {
+    return ggml_backend_nnapi_init();
+
+    GGML_UNUSED(dev);
+    GGML_UNUSED(params);
+}
+
+static ggml_backend_buffer_type_t ggml_backend_nnapi_device_get_buffer_type(ggml_backend_dev_t dev) {
+    return ggml_backend_cpu_buffer_type();
+
+    GGML_UNUSED(dev);
+}
+
+static ggml_backend_buffer_t ggml_backend_nnapi_device_buffer_from_host_ptr(ggml_backend_dev_t dev, void * ptr, size_t size, size_t max_tensor_size) {
+    return ggml_backend_cpu_buffer_from_ptr(ptr, size);
+
+    GGML_UNUSED(dev);
+    GGML_UNUSED(max_tensor_size);
+}
+
+static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
+
+    GGML_LOG_WARN("Testing NNAPI device for tensor %s (op %s) on ctx %p",
+                  op->name, ggml_op_name(op->op), dev->context);
+
+    switch (op->op) {
+        case GGML_OP_MUL_MAT:
+        {
+            const struct ggml_tensor * src0 = op->src[0];
+            const struct ggml_tensor * src1 = op->src[1];
+
+            // TODO: Return actual OPs we do support
+
+//            print_tensor_info("src0", src0);
+//            print_tensor_info("src1", src1);
+//            print_tensor_info("dst", op);
+
+//            GGML_LOG_WARN("Tensor 0 type: %s op: %s (%s) ne0 %ld cont %d",
+//                          ggml_type_name(src0->type),
+//                          ggml_op_name(src0->op),
+//                          ggml_op_symbol(src0->op),
+//                          src0->ne[0],
+//                          ggml_is_contiguous(src0));
+//            GGML_LOG_WARN("Tensor 1 type: %s op: %s (%s) ne0 %ld cont %d",
+//                          ggml_type_name(src1->type),
+//                          ggml_op_name(src1->op),
+//                          ggml_op_symbol(src1->op),
+//                          src0->ne[1],
+//                          ggml_is_contiguous(src1));
+
+            return ggml_is_contiguous(src0) &&
+                   ggml_is_contiguous(src1);
+        }
+        case GGML_OP_NONE:
+            return true;
+        case GGML_OP_RESHAPE:
+        case GGML_OP_VIEW:
+        case GGML_OP_PERMUTE:
+        case GGML_OP_TRANSPOSE:
+        case GGML_OP_OUT_PROD:
+        default:
+            return false;
+    }
+
+    GGML_UNUSED(dev);
+}
+
+static bool ggml_backend_nnapi_device_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) {
+    return ggml_backend_buft_is_host(buft);
+
+    GGML_UNUSED(dev);
+}
+
+static const struct ggml_backend_device_i ggml_backend_nnapi_device_i = {
+    .get_name             = ggml_backend_nnapi_device_get_name,
+    .get_description      = ggml_backend_nnapi_device_get_description,
+    .get_memory           = ggml_backend_nnapi_device_get_memory,
+    .get_type             = ggml_backend_nnapi_device_get_type,
+    .get_props            = ggml_backend_nnapi_device_get_props,
+    .init_backend         = ggml_backend_nnapi_device_init_backend,
+    .get_buffer_type      = ggml_backend_nnapi_device_get_buffer_type,
+    .get_host_buffer_type = nullptr,
+    .buffer_from_host_ptr = ggml_backend_nnapi_device_buffer_from_host_ptr,
+    .supports_op          = ggml_backend_nnapi_device_supports_op,
+    .supports_buft        = ggml_backend_nnapi_device_supports_buft,
+    .offload_op           = nullptr,
+    .event_new            = nullptr,
+    .event_free           = nullptr,
+    .event_synchronize    = nullptr,
+};
+
+// backend reg interface
+static const char * ggml_backend_nnapi_reg_get_name(ggml_backend_reg_t reg) {
+    return "NNAPI";
+
+    GGML_UNUSED(reg);
+}
+
+static size_t ggml_backend_nnapi_reg_get_device_count(ggml_backend_reg_t reg) {
+    return 1;
+
+    GGML_UNUSED(reg);
+}
+
+static ggml_backend_dev_t ggml_backend_nnapi_reg_get_device(ggml_backend_reg_t reg, size_t index) {
+    GGML_ASSERT(index == 0);
+
+    static ggml_backend_device ggml_backend_nnapi_device = {
+        .iface   = ggml_backend_nnapi_device_i,
+        .reg     = reg,
+        .context = nullptr,
+    };
+
+    return &ggml_backend_nnapi_device;
+
+    GGML_UNUSED(reg);
+    GGML_UNUSED(index);
+}
+
+static void * ggml_backend_nnapi_get_proc_address(ggml_backend_reg_t reg, const char * name) {
+    if (std::strcmp(name, "ggml_backend_set_n_threads") == 0) {
+        return (void *)ggml_backend_nnapi_set_n_threads;
+    }
+    return nullptr;
+
+    GGML_UNUSED(reg);
+    GGML_UNUSED(name);
+}
+
+static const struct ggml_backend_reg_i ggml_backend_nnapi_reg_i = {
+    .get_name         = ggml_backend_nnapi_reg_get_name,
+    .get_device_count = ggml_backend_nnapi_reg_get_device_count,
+    .get_device       = ggml_backend_nnapi_reg_get_device,
+    .get_proc_address = ggml_backend_nnapi_get_proc_address,
+};
+
+ggml_backend_reg_t ggml_backend_nnapi_reg(void) {
+    static struct ggml_backend_reg ggml_backend_nnapi_reg = {
+        .api_version = GGML_BACKEND_API_VERSION,
+        .iface       = ggml_backend_nnapi_reg_i,
+        .context     = nullptr,
+    };
+
+    return &ggml_backend_nnapi_reg;
+}
+
+GGML_BACKEND_DL_IMPL(ggml_backend_nnapi_reg)

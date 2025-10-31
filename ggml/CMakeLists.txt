@@ -219,6 +219,8 @@ set   (GGML_OPENCL_TARGET_VERSION "300" CACHE STRING
 # toolchain for vulkan-shaders-gen
 set   (GGML_VULKAN_SHADERS_GEN_TOOLCHAIN "" CACHE FILEPATH "ggml: toolchain file for vulkan-shaders-gen")
 
+option(GGML_NNAPI                          "ggml: use NNAPI"                                  OFF)
+
 # extra artifacts
 option(GGML_BUILD_TESTS    "ggml: build tests"    ${GGML_STANDALONE})
 option(GGML_BUILD_EXAMPLES "ggml: build examples" ${GGML_STANDALONE})
