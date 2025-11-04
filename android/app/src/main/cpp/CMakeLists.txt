@@ -12,6 +12,11 @@ add_subdirectory(../../../../../ build-llama)
 add_library(llama_cpp_android SHARED
         llama-app.cpp)
 
+target_include_directories(llama_cpp_android
+        PUBLIC
+        ../../../../../common
+        ../../../../../vendor)
+
 target_link_libraries(llama_cpp_android
         llama
         common
