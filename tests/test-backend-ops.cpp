@@ -7111,12 +7111,12 @@ static int run(test_mode mode,
             continue;
         }
 
-        if (backend_filter == NULL && ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU && mode != MODE_GRAD) {
-            output_printer->print_backend_init(backend_init_info(
-                i, ggml_backend_dev_count(), ggml_backend_dev_name(dev), true, "Skipping CPU backend"));
-            n_ok++;
-            continue;
-        }
+//        if (backend_filter == NULL && ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU && mode != MODE_GRAD) {
+//            output_printer->print_backend_init(backend_init_info(
+//                i, ggml_backend_dev_count(), ggml_backend_dev_name(dev), true, "Skipping CPU backend"));
+//            n_ok++;
+//            continue;
+//        }
 
         ggml_backend_t backend = ggml_backend_dev_init(dev, NULL);
         GGML_ASSERT(backend != NULL);
