@@ -9,6 +9,16 @@
 #include <android/NeuralNetworks.h>
 #include <android/sharedmem.h>
 #include <sys/mman.h>
+#include <ggml-quants.h>
+
+constexpr float nnapi_input_scale = 1.0 / static_cast<float>(127);
+//constexpr float nnapi_output_scale = 7.0 / static_cast<float>(127);
+// 128
+//constexpr float nnapi_output_scale = 16.0 / static_cast<float>(127);
+// 256
+//constexpr float nnapi_output_scale = 24.0 / static_cast<float>(127);
+// 1024
+constexpr float nnapi_output_scale = 56.0 / static_cast<float>(127);
 
 static OperandCode ggml_to_nnapi_type(ggml_type gt) {
     switch(gt) {
@@ -52,7 +62,7 @@ public:
 
     nnapi_tensor() = default;
 
-    nnapi_tensor(const ggml_tensor * tensor, size_t element_size,
+    nnapi_tensor(const ggml_tensor * tensor, ggml_type type_for_size,
                  bool flip_dimensions=false, bool is_output=false) {
         if (flip_dimensions) {
             dimensions = {
@@ -75,11 +85,24 @@ public:
         };
 
         if (op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            op_type.scale = 1.0f;
+            // TODO: Don't hardcode this
+            op_type.scale = nnapi_input_scale;
         }
 
         nels = ggml_nelements(tensor);
 
+        size_t element_size = 0;
+        switch (type_for_size) {
+            case GGML_TYPE_F32:
+            case GGML_TYPE_F16:
+                element_size = ggml_type_size(type_for_size);
+                break;
+            case GGML_TYPE_Q8_0:
+                element_size = sizeof(int8_t);
+                break;
+            default:
+                GGML_LOG_ERROR("Unsupported tensor size.");
+        }
         size = nels * element_size;
 
         int prot = PROT_READ;
@@ -100,6 +123,35 @@ public:
                 munmap(map, size);
                 break;
             }
+            case GGML_TYPE_Q8_0:
+            {
+                const uint8_t *ggml_raw = reinterpret_cast<uint8_t*>(tensor->data);
+                void* nnapi_map = mmap(nullptr, size, PROT_WRITE, MAP_SHARED, fd, 0);
+                auto *nnapi_target_int8 = reinterpret_cast<int8_t*>(nnapi_map);
+                constexpr size_t type_size = sizeof(block_q8_0);
+                constexpr size_t blck_size = QK8_0;
+                const size_t nbytes = ggml_nbytes(tensor);
+                const size_t nblocks = nbytes / type_size;
+
+                size_t index_linear = 0;
+                for (size_t current_block = 0; current_block < nblocks; current_block++) {
+                    const size_t offset = current_block * type_size;
+                    const uint8_t *block_start = ggml_raw + offset;
+                    const auto *block = reinterpret_cast<const block_q8_0*>(block_start);
+
+                    ggml_half block_delta = block->d;
+                    const float ggml_block_scale = GGML_FP16_TO_FP32(block_delta);
+
+                    for (int8_t q : block->qs) {
+                        float dequantized = static_cast<float>(q) * ggml_block_scale;
+                        auto requantized = static_cast<int8_t>(dequantized / nnapi_input_scale);
+                        nnapi_target_int8[index_linear] = requantized;
+                        index_linear++;
+                    }
+                }
+                munmap(nnapi_map, size);
+                break;
+            }
             default:
                 GGML_LOG_ERROR("Unsupported type %s", ggml_type_name(tensor->type));
                 assert(false);
@@ -108,7 +160,8 @@ public:
 
     void write_transposed(const ggml_tensor * tensor) const {
         if (!(tensor->type == GGML_TYPE_F16 ||
-              tensor->type == GGML_TYPE_F32)) {
+              tensor->type == GGML_TYPE_F32 ||
+              tensor->type == GGML_TYPE_Q8_0)) {
             GGML_LOG_ERROR("Unsupported type %s", ggml_type_name(tensor->type));
             assert(false);
         }
@@ -116,16 +169,39 @@ public:
         uint32_t index_linear = 0;
         const uint8_t *data = reinterpret_cast<uint8_t*>(tensor->data);
         void* map = mmap(nullptr, size, PROT_WRITE, MAP_SHARED, fd, 0);
+        auto* map_int8 = reinterpret_cast<int8_t*>(map);
 
-        for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
-            for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
-                size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
-                if (tensor->type == GGML_TYPE_F32) {
-                    reinterpret_cast<float*>(map)[index_linear] = *reinterpret_cast<const float *>(&data[index_transposed]);
-                } else if (tensor->type == GGML_TYPE_F16) {
-                    reinterpret_cast<_Float16*>(map)[index_linear] = *reinterpret_cast<const _Float16 *>(&data[index_transposed]);
+        if (tensor->type == GGML_TYPE_Q8_0) {
+            constexpr size_t type_size = sizeof(block_q8_0);
+            constexpr size_t blck_size = QK8_0;
+            const size_t nbytes = ggml_nbytes(tensor);
+            const size_t nblocks = nbytes / type_size;
+            const size_t blocks_per_width = tensor->ne[0] / QK8_0;
+
+            for (size_t current_block = 0; current_block < nblocks; current_block++) {
+                const size_t offset = current_block * type_size;
+                const uint8_t *block_start = data + offset;
+                const auto *block = reinterpret_cast<const block_q8_0*>(block_start);
+                const float block_scale = GGML_FP16_TO_FP32(block->d);
+                for (size_t j = 0; j < blck_size; ++j) {
+                    // TODO: Make sure this works on NxM
+                    size_t current_row = current_block / blocks_per_width;
+                    size_t row_offset = (current_block % blocks_per_width) * blck_size + j;
+                    size_t index_transposed = row_offset * tensor->ne[0] + current_row;
+                    map_int8[index_transposed] = static_cast<int8_t>(static_cast<float>(block->qs[j])*block_scale / nnapi_input_scale);
                 }
-                index_linear++;
+            }
+        } else {
+            for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+                for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
+                    size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
+                    if (tensor->type == GGML_TYPE_F32) {
+                        reinterpret_cast<float*>(map)[index_linear] = *reinterpret_cast<const float *>(&data[index_transposed]);
+                    } else if (tensor->type == GGML_TYPE_F16) {
+                        reinterpret_cast<_Float16*>(map)[index_linear] = *reinterpret_cast<const _Float16 *>(&data[index_transposed]);
+                    }
+                    index_linear++;
+                }
             }
         }
         munmap(map, size);
@@ -139,26 +215,41 @@ public:
         }
 
         if (op_type.type != ANEURALNETWORKS_TENSOR_FLOAT32 &&
-            op_type.type != ANEURALNETWORKS_TENSOR_FLOAT16) {
+            op_type.type != ANEURALNETWORKS_TENSOR_FLOAT16 &&
+            op_type.type != ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
             GGML_LOG_ERROR("Unsupported type %d", op_type.type);
             return;
         }
 
         uint32_t index_linear = 0;
-        auto *dst_data = reinterpret_cast<uint8_t*>(tensor->data);
         void *map = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
 
-        for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+        if (op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            auto *dst_float = reinterpret_cast<float*>(tensor->data);
+            auto *nnapi_src = reinterpret_cast<int8_t*>(map);
+            // TODO: Why is this transposed dimension order different than below?
             for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
-                size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
-                if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT32) {
-                    *reinterpret_cast<float *>(&dst_data[index_transposed]) = reinterpret_cast<float*>(map)[index_linear];
-                } else if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT16) {
-                    *reinterpret_cast<float *>(&dst_data[index_transposed]) = reinterpret_cast<_Float16*>(map)[index_linear];
+                for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+                    size_t index = i00 * tensor->ne[0] + i01;
+                    dst_float[index_linear] = static_cast<float>(nnapi_src[index]) * nnapi_output_scale;
+                    index_linear++;
                 }
-                index_linear++;
+            }
+        } else {
+            auto *dst_data = reinterpret_cast<uint8_t*>(tensor->data);
+            for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+                for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
+                    size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
+                    if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT32) {
+                        *reinterpret_cast<float *>(&dst_data[index_transposed]) = reinterpret_cast<float*>(map)[index_linear];
+                    } else if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT16) {
+                        *reinterpret_cast<float *>(&dst_data[index_transposed]) = reinterpret_cast<_Float16*>(map)[index_linear];
+                    }
+                    index_linear++;
+                }
             }
         }
+
         munmap(map, size);
     }
 };
@@ -327,6 +418,62 @@ static void print_ggml_f32_tensor(const ggml_tensor * tensor) {
             }
         }
     }
+}
+
+static void print_ggml_q80_tensor(const ggml_tensor * tensor, bool print_quantized) {
+    std::stringstream ss;
+
+    size_t nbytes = ggml_nbytes(tensor);
+    size_t type_size = ggml_type_size(tensor->type);
+    size_t blck_size = ggml_blck_size(tensor->type); // == QK8_0
+    size_t nblocks = nbytes / type_size;
+
+    for (size_t current_block = 0; current_block < nblocks; current_block++) {
+        size_t offset = current_block * type_size;
+        const uint8_t *block_start = reinterpret_cast<uint8_t*>(tensor->data) + offset;
+        const auto *block = reinterpret_cast<const block_q8_0*>(block_start);
+
+        const float block_scale = GGML_FP16_TO_FP32(block->d);
+        for (size_t j = 0; j < blck_size; ++j) {
+            float dequantized = static_cast<float>(block->qs[j]) * block_scale;
+            if (print_quantized) {
+                ss << static_cast<int>(block->qs[j]);
+            } else {
+                ss << dequantized;
+            }
+            if (j < blck_size - 1) {
+                ss << ", ";
+            }
+        }
+        GGML_LOG_INFO("[%s],", ss.str().c_str());
+        ss.str("");
+        ss.clear();
+    }
+}
+
+static void print_nnapi_q80_tensor(const nnapi_tensor * tensor, bool print_quantized, float scale) {
+    std::stringstream ss;
+
+    void* nnapi_map = mmap(nullptr, tensor->size, PROT_WRITE, MAP_SHARED, tensor->fd, 0);
+    auto* nnapi_map_int8 = reinterpret_cast<int8_t*>(nnapi_map);
+
+    for (size_t x = 0; x < tensor->dimensions[0]; x++) {
+        for (size_t y = 0; y < tensor->dimensions[1]; ++y) {
+            size_t index = x * tensor->dimensions[0] + y;
+            float dequantized = static_cast<float>(nnapi_map_int8[index]) * scale;
+            if (print_quantized) {
+                ss << static_cast<int>(nnapi_map_int8[index]) << " ";
+            } else {
+                ss << dequantized << " ";
+            }
+        }
+
+        GGML_LOG_INFO("%s", ss.str().c_str());
+        ss.str("");
+        ss.clear();
+    }
+
+    munmap(nnapi_map, tensor->size);
 }
 
 static bool build_mat_mul_model(ANeuralNetworksModel** model,
@@ -553,12 +700,16 @@ static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct 
 
     // TODO: do this even earlier
     if (ctx->pipeline.model == nullptr) {
-        ctx->pipeline.src0 = nnapi_tensor(src0, ggml_type_size(src0->type), true, false);
-        ctx->pipeline.src1 = nnapi_tensor(src1, ggml_type_size(src1->type), false, false);
+        ctx->pipeline.src0 = nnapi_tensor(src0, src0->type, true, false);
+        ctx->pipeline.src1 = nnapi_tensor(src1, src1->type, false, false);
 
         // Set NNAPI output dtype to match input, we will be converting to f32 later
-        ctx->pipeline.dst = nnapi_tensor(dst, ggml_type_size(src0->type), false, true);
+        ctx->pipeline.dst = nnapi_tensor(dst, src0->type, false, true);
         ctx->pipeline.dst.op_type.type = ggml_to_nnapi_type(src0->type);
+        if (ctx->pipeline.dst.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            // TODO: Don't hardcode this
+            ctx->pipeline.dst.op_type.scale = nnapi_output_scale;
+        }
 
         if (!build_mat_mul_model(&ctx->pipeline.model,
                                  &ctx->pipeline.src0.op_type,
