@@ -5780,6 +5780,17 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     std::vector<std::unique_ptr<test_case>> test_cases;
     std::default_random_engine rng(0);
 
+    // TODO: Make multiple tests work at once
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 128, 128, 128, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 32, 32, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4, 4, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 16, 16, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 2048, 2048, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+
+    return test_cases;
+
     // unary ops
     for (ggml_type type : {GGML_TYPE_F16, GGML_TYPE_F32}) {
         for (int v : {0, 1}) {
@@ -6772,6 +6783,21 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
 static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
     std::vector<std::unique_ptr<test_case>> test_cases;
 
+    // TODO: make multiple tests work at once
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 16, 16, 16, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 16, 16, 16, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 64, 64, 64, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 128, 128, 128, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 1024, 1024, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 2048, 2048, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    // too large for npu without batching
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4096, 4096, 4096, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 8192, 8192, 8192, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+
+    return test_cases;
+
     // Conv2d: K=CRS=NPQ=4096 matmul performance
     uint32_t                        iwh_idx  = 0;
     uint32_t                        kwh_idx  = 1;
@@ -7166,9 +7192,13 @@ static int run(test_mode mode,
 
 void android_main(android_app* state) {
     (void) state;
+//    test_mode mode = MODE_PERF;
     test_mode mode = MODE_TEST;
     output_formats output_format = ANDROID_LOG;
-    const char * op_name_filter = nullptr;
+//    const char * op_name_filter = nullptr;
+    const char * op_name_filter = "MUL_MAT";
+
+//    const char * backend_filter = "NNAPI Device";
     const char * backend_filter = nullptr;
     const char * params_filter = nullptr;
 
