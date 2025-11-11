@@ -7172,10 +7172,9 @@ void android_main(android_app* state) {
     const char * backend_filter = nullptr;
     const char * params_filter = nullptr;
 
+    // Vulkan validation fix
     std::filesystem::path cwd = std::filesystem::current_path();
-    ALOGE("old current path: %s", cwd.string().c_str());
     std::filesystem::current_path("/data/user/0/ai.ggml.llamacpp");
-    ALOGE("new current path: %s", cwd.string().c_str());
 
     run(mode, output_format, op_name_filter, backend_filter, params_filter);
 }
