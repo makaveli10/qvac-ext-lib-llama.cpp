@@ -1380,6 +1380,17 @@ struct test_case {
             std::vector<float> f1 = tensor_to_float(t1);
             std::vector<float> f2 = tensor_to_float(t2);
 
+            if (std::strcmp(t1->name, "out") == 0)
+            {
+                float t1_max = *std::max_element(f1.begin(), f1.end());
+                float t1_min = *std::min_element(f1.begin(), f1.end());
+                ALOGE("%s (%s) Range: %f - %f", bn1, t1->name, t1_min, t1_max);
+
+                float t2_max = *std::max_element(f2.begin(), f2.end());
+                float t2_min = *std::min_element(f2.begin(), f2.end());
+                ALOGE("%s (%s) Range: %f - %f", bn2, t2->name, t2_min, t2_max);
+            }
+
             for (size_t i = 0; i < f1.size(); i++) {
                 // check for nans
                 if (std::isnan(f1[i]) || std::isnan(f2[i])) {
