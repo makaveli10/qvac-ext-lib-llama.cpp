@@ -11,15 +11,6 @@
 #include <sys/mman.h>
 #include <ggml-quants.h>
 
-constexpr float nnapi_input_scale = 1.0 / static_cast<float>(127);
-//constexpr float nnapi_output_scale = 7.0 / static_cast<float>(127);
-// 128
-//constexpr float nnapi_output_scale = 16.0 / static_cast<float>(127);
-// 256
-//constexpr float nnapi_output_scale = 24.0 / static_cast<float>(127);
-// 1024
-constexpr float nnapi_output_scale = 56.0 / static_cast<float>(127);
-
 static OperandCode ggml_to_nnapi_type(ggml_type gt) {
     switch(gt) {
         case GGML_TYPE_F32:
@@ -84,11 +75,6 @@ public:
             .zeroPoint = 0,
         };
 
-        if (op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            // TODO: Don't hardcode this
-            op_type.scale = nnapi_input_scale;
-        }
-
         nels = ggml_nelements(tensor);
 
         size_t element_size = 0;
@@ -113,6 +99,7 @@ public:
                                                     static_cast<uint32_t>(nels),
                                                     element_size, prot);
     }
+
     void write(const ggml_tensor * tensor) const {
         switch(tensor->type) {
             case GGML_TYPE_F32:
@@ -144,7 +131,7 @@ public:
 
                     for (int8_t q : block->qs) {
                         float dequantized = static_cast<float>(q) * ggml_block_scale;
-                        auto requantized = static_cast<int8_t>(dequantized / nnapi_input_scale);
+                        auto requantized = static_cast<int8_t>(dequantized / op_type.scale);
                         nnapi_target_int8[index_linear] = requantized;
                         index_linear++;
                     }
@@ -188,7 +175,7 @@ public:
                     size_t current_row = current_block / blocks_per_width;
                     size_t row_offset = (current_block % blocks_per_width) * blck_size + j;
                     size_t index_transposed = row_offset * tensor->ne[0] + current_row;
-                    map_int8[index_transposed] = static_cast<int8_t>(static_cast<float>(block->qs[j])*block_scale / nnapi_input_scale);
+                    map_int8[index_transposed] = static_cast<int8_t>(static_cast<float>(block->qs[j])*block_scale / op_type.scale);
                 }
             }
         } else {
@@ -231,7 +218,7 @@ public:
             for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
                 for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
                     size_t index = i00 * tensor->ne[0] + i01;
-                    dst_float[index_linear] = static_cast<float>(nnapi_src[index]) * nnapi_output_scale;
+                    dst_float[index_linear] = static_cast<float>(nnapi_src[index]) * op_type.scale;
                     index_linear++;
                 }
             }
@@ -694,6 +681,39 @@ static bool dispatch_model(ANeuralNetworksCompilation* compilation,
     return true;
 }
 
+static float tensor_q80_get_max_scale(const ggml_tensor * tensor) {
+    const uint8_t *ggml_raw = reinterpret_cast<uint8_t*>(tensor->data);
+    constexpr size_t type_size = sizeof(block_q8_0);
+    const size_t nblocks = ggml_nbytes(tensor) / type_size;
+    float max_block_scale = std::numeric_limits<float>::min();
+
+    for (size_t current_block = 0; current_block < nblocks; current_block++) {
+        const auto *block = reinterpret_cast<const block_q8_0*>(ggml_raw + current_block * type_size);
+        max_block_scale = std::max(max_block_scale, GGML_FP16_TO_FP32(block->d));
+    }
+    return max_block_scale;
+}
+
+// TODO: Figure this out for NxM
+static float estimate_q80_output_scale(const ggml_tensor * src0, float src0_scale,
+                                       const ggml_tensor * src1, float src1_scale) {
+
+    float max_input_scale = std::max(src0_scale, src1_scale);
+    float max_abs_input_value = 127.0f * max_input_scale;
+
+    int64_t max_dimension = std::max(src0->ne[0], src0->ne[1]);
+    max_dimension = std::max(max_dimension, src1->ne[0]);
+    max_dimension = std::max(max_dimension, src1->ne[1]);
+
+    float max_abs_output_value = static_cast<float>(max_dimension) * max_abs_input_value;
+
+//    GGML_LOG_ERROR("max_dimension %ld max abs input %f max_abs_output_value %f",
+//                   max_dimension, max_abs_input_value, max_abs_output_value);
+
+    // TODO: This is just a guess determined by experimentation which worked for NxN tests
+    return (2 * std::sqrt(max_abs_output_value)) / 127.0f;
+}
+
 static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct ggml_tensor * dst) {
     const struct ggml_tensor * src0 = dst->src[0];
     const struct ggml_tensor * src1 = dst->src[1];
@@ -701,14 +721,21 @@ static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct 
     // TODO: do this even earlier
     if (ctx->pipeline.model == nullptr) {
         ctx->pipeline.src0 = nnapi_tensor(src0, src0->type, true, false);
+        if (ctx->pipeline.src0.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            ctx->pipeline.src0.op_type.scale = tensor_q80_get_max_scale(src0);
+        }
+
         ctx->pipeline.src1 = nnapi_tensor(src1, src1->type, false, false);
+        if (ctx->pipeline.src1.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            ctx->pipeline.src1.op_type.scale = tensor_q80_get_max_scale(src1);
+        }
 
         // Set NNAPI output dtype to match input, we will be converting to f32 later
         ctx->pipeline.dst = nnapi_tensor(dst, src0->type, false, true);
         ctx->pipeline.dst.op_type.type = ggml_to_nnapi_type(src0->type);
         if (ctx->pipeline.dst.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            // TODO: Don't hardcode this
-            ctx->pipeline.dst.op_type.scale = nnapi_output_scale;
+            ctx->pipeline.dst.op_type.scale = estimate_q80_output_scale(src0, ctx->pipeline.src0.op_type.scale,
+                                                                        src1, ctx->pipeline.src1.op_type.scale);
         }
 
         if (!build_mat_mul_model(&ctx->pipeline.model,
