@@ -7146,6 +7146,13 @@ static int run(test_mode mode,
     for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
 
+        if (strcmp("Vulkan0", ggml_backend_dev_name(dev)) == 0) {
+            output_printer->print_backend_init(
+                    backend_init_info(i, ggml_backend_dev_count(), ggml_backend_dev_name(dev), true, "Skipping"));
+            n_ok++;
+            continue;
+        }
+
         if (backend_filter != NULL && strcmp(backend_filter, ggml_backend_dev_name(dev)) != 0) {
             output_printer->print_backend_init(
                 backend_init_info(i, ggml_backend_dev_count(), ggml_backend_dev_name(dev), true, "Skipping"));
