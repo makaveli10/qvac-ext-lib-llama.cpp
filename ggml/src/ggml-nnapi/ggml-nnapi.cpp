@@ -1005,8 +1005,8 @@ static ggml_backend_buffer_t ggml_backend_nnapi_device_buffer_from_host_ptr(ggml
 
 static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
 
-    GGML_LOG_WARN("Testing NNAPI device for tensor %s (op %s) on ctx %p",
-                  op->name, ggml_op_name(op->op), dev->context);
+//    GGML_LOG_WARN("Testing NNAPI device for tensor %s (op %s) on ctx %p",
+//                  op->name, ggml_op_name(op->op), dev->context);
 
     switch (op->op) {
         case GGML_OP_MUL_MAT:
