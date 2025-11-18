@@ -5,6 +5,8 @@
 #include <future>
 #include <vector>
 #include <cstring>
+#include <map>
+#include <tuple>
 
 #include <android/NeuralNetworks.h>
 #include <android/sharedmem.h>
@@ -245,6 +247,15 @@ public:
     }
 };
 
+static float tensor_q80_get_max_scale(const ggml_tensor * tensor);
+static float estimate_q80_output_scale(const ggml_tensor * src0, float src0_scale,
+                                       const ggml_tensor * src1, float src1_scale);
+static bool build_mat_mul_model(ANeuralNetworksModel** model,
+                                ANeuralNetworksOperandType *in_tensor0_type,
+                                ANeuralNetworksOperandType *in_tensor1_type,
+                                ANeuralNetworksOperandType *out_tensor_type);
+static bool compile_model(ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation);
+
 struct nnapi_pipeline {
     ANeuralNetworksModel* model = nullptr;
     ANeuralNetworksCompilation* compilation = nullptr;
@@ -252,11 +263,64 @@ struct nnapi_pipeline {
     nnapi_tensor src0;
     nnapi_tensor src1;
     nnapi_tensor dst;
+
+    nnapi_pipeline(const struct ggml_tensor * a,
+                   const struct ggml_tensor * b,
+                   const struct ggml_tensor * c) {
+        src0 = nnapi_tensor(a, a->type, true, false);
+        if (src0.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            src0.op_type.scale = tensor_q80_get_max_scale(a);
+        }
+
+        src1 = nnapi_tensor(b, b->type, false, false);
+        if (src1.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            src1.op_type.scale = tensor_q80_get_max_scale(b);
+        }
+
+        // Set NNAPI output dtype to match input, we will be converting to f32 later
+        dst = nnapi_tensor(c, a->type, false, true);
+        dst.op_type.type = ggml_to_nnapi_type(a->type);
+        if (dst.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+            dst.op_type.scale = estimate_q80_output_scale(a, src0.op_type.scale,
+                                                            b, src1.op_type.scale);
+        }
+
+        if (!build_mat_mul_model(&model,
+                                 &src0.op_type,
+                                 &src1.op_type,
+                                 &dst.op_type)) {
+            GGML_LOG_ERROR("Failed to build the mat mul model");
+            return;
+        }
+
+        if (!compile_model(model, &compilation)) {
+            GGML_LOG_ERROR("Failed to compile model.");
+            return;
+        }
+    }
+
+    ~nnapi_pipeline() {
+        ANeuralNetworksMemory_free(src0.memory);
+        ANeuralNetworksMemory_free(src1.memory);
+        ANeuralNetworksMemory_free(dst.memory);
+
+        close(src0.fd);
+        close(src1.fd);
+        close(dst.fd);
+
+        ANeuralNetworksCompilation_free(compilation);
+        ANeuralNetworksModel_free(model);
+    }
 };
 
 struct ggml_backend_nnapi_context {
     std::vector<ANeuralNetworksDevice*> devices;
-    nnapi_pipeline pipeline;
+
+    std::map<std::tuple<uint32_t, // N
+                        uint32_t, // K
+                        uint32_t, // M
+                        ggml_type>,
+             std::unique_ptr<nnapi_pipeline>> pipelines;
 };
 
 #define ENUM_TO_STR(r)                                                         \
@@ -723,52 +787,29 @@ static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct 
     const struct ggml_tensor * src0 = dst->src[0];
     const struct ggml_tensor * src1 = dst->src[1];
 
+    const auto op_tuple = std::tuple<uint32_t, uint32_t, uint32_t, ggml_type>(src0->ne[1],
+                                                                              src0->ne[0],
+                                                                              src1->ne[1],
+                                                                              src0->type);
     // TODO: do this even earlier
-    if (ctx->pipeline.model == nullptr) {
-        ctx->pipeline.src0 = nnapi_tensor(src0, src0->type, true, false);
-        if (ctx->pipeline.src0.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            ctx->pipeline.src0.op_type.scale = tensor_q80_get_max_scale(src0);
-        }
-
-        ctx->pipeline.src1 = nnapi_tensor(src1, src1->type, false, false);
-        if (ctx->pipeline.src1.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            ctx->pipeline.src1.op_type.scale = tensor_q80_get_max_scale(src1);
-        }
-
-        // Set NNAPI output dtype to match input, we will be converting to f32 later
-        ctx->pipeline.dst = nnapi_tensor(dst, src0->type, false, true);
-        ctx->pipeline.dst.op_type.type = ggml_to_nnapi_type(src0->type);
-        if (ctx->pipeline.dst.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            ctx->pipeline.dst.op_type.scale = estimate_q80_output_scale(src0, ctx->pipeline.src0.op_type.scale,
-                                                                        src1, ctx->pipeline.src1.op_type.scale);
-        }
-
-        if (!build_mat_mul_model(&ctx->pipeline.model,
-                                 &ctx->pipeline.src0.op_type,
-                                 &ctx->pipeline.src1.op_type,
-                                 &ctx->pipeline.dst.op_type)) {
-            GGML_LOG_ERROR("Failed to build the mat mul model");
-            return;
-        }
-
-        if (!compile_model(ctx->pipeline.model, &ctx->pipeline.compilation)) {
-            GGML_LOG_ERROR("Failed to compile model.");
-            return;
-        }
+    if (!ctx->pipelines.count(op_tuple)) {
+        auto p = std::make_unique<nnapi_pipeline>(src0, src1, dst);
+        ctx->pipelines.emplace(op_tuple, std::move(p));
     }
+    nnapi_pipeline *pipeline = ctx->pipelines.at(op_tuple).get();
 
-    ctx->pipeline.src0.write(src0);
-    ctx->pipeline.src1.write_transposed(src1);
+    pipeline->src0.write(src0);
+    pipeline->src1.write_transposed(src1);
 
-    if (!dispatch_model(ctx->pipeline.compilation,
-                        &ctx->pipeline.src0,
-                        &ctx->pipeline.src1,
-                        &ctx->pipeline.dst)) {
+    if (!dispatch_model(pipeline->compilation,
+                        &pipeline->src0,
+                        &pipeline->src1,
+                        &pipeline->dst)) {
         GGML_LOG_ERROR("Failed to dispatch model.");
         return;
     }
 
-    ctx->pipeline.dst.read_transposed(dst);
+    pipeline->dst.read_transposed(dst);
 }
 
 
@@ -821,18 +862,6 @@ static const char * ggml_backend_nnapi_get_name(ggml_backend_t backend) {
 
 static void ggml_backend_nnapi_free(ggml_backend_t backend) {
     auto * ctx = reinterpret_cast<ggml_backend_nnapi_context *>(backend->context);
-
-    ANeuralNetworksMemory_free(ctx->pipeline.src0.memory);
-    ANeuralNetworksMemory_free(ctx->pipeline.src1.memory);
-    ANeuralNetworksMemory_free(ctx->pipeline.dst.memory);
-
-    close(ctx->pipeline.src0.fd);
-    close(ctx->pipeline.src1.fd);
-    close(ctx->pipeline.dst.fd);
-
-    ANeuralNetworksCompilation_free(ctx->pipeline.compilation);
-    ANeuralNetworksModel_free(ctx->pipeline.model);
-
     delete ctx;
     delete backend;
 }
