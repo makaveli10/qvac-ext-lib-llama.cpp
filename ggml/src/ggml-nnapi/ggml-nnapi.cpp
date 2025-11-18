@@ -57,11 +57,15 @@ public:
                  bool flip_dimensions=false, bool is_output=false) {
         if (flip_dimensions) {
             dimensions = {
+                    1, // batch dimension
+                    1, // batch dimension
                     static_cast<uint32_t>(tensor->ne[1]),
                     static_cast<uint32_t>(tensor->ne[0]),
             };
         } else {
             dimensions = {
+                    1, // batch dimension
+                    1, // batch dimension
                     static_cast<uint32_t>(tensor->ne[0]),
                     static_cast<uint32_t>(tensor->ne[1]),
             };
@@ -444,13 +448,14 @@ static void print_nnapi_q80_tensor(const nnapi_tensor * tensor, bool print_quant
     void* nnapi_map = mmap(nullptr, tensor->size, PROT_WRITE, MAP_SHARED, tensor->fd, 0);
     auto* nnapi_map_int8 = reinterpret_cast<int8_t*>(nnapi_map);
 
-    for (size_t x = 0; x < tensor->dimensions[0]; x++) {
-        for (size_t y = 0; y < tensor->dimensions[1]; ++y) {
-            size_t index = x * tensor->dimensions[0] + y;
-            float dequantized = static_cast<float>(nnapi_map_int8[index]) * scale;
+    for (size_t x = 0; x < tensor->dimensions[2]; x++) {
+        for (size_t y = 0; y < tensor->dimensions[3]; ++y) {
+            size_t index = x * tensor->dimensions[2] + y;
+
             if (print_quantized) {
                 ss << static_cast<int>(nnapi_map_int8[index]) << " ";
             } else {
+                float dequantized = static_cast<float>(nnapi_map_int8[index]) * scale;
                 ss << dequantized << " ";
             }
         }
