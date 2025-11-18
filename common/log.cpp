@@ -88,7 +88,7 @@ static std::vector<const char *> g_col = {
 static android_LogPriority ggml_to_android_log_level(enum ggml_log_level level) {
     switch (level) {
         case GGML_LOG_LEVEL_NONE:
-            return ANDROID_LOG_DEFAULT;
+            return ANDROID_LOG_INFO;
         case GGML_LOG_LEVEL_DEBUG:
             return ANDROID_LOG_DEBUG;
         case GGML_LOG_LEVEL_INFO:
