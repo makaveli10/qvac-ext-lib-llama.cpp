@@ -247,8 +247,7 @@ public:
 };
 
 static float tensor_q80_get_max_scale(const ggml_tensor * tensor);
-static float estimate_q80_output_scale(const ggml_tensor * src0, float src0_scale,
-                                       const ggml_tensor * src1, float src1_scale);
+static float estimate_q80_output_scale(const ggml_tensor * src0, float scale0, float scale1);
 static bool build_mat_mul_model(ANeuralNetworksModel** model,
                                 ANeuralNetworksOperandType *in_tensor0_type,
                                 ANeuralNetworksOperandType *in_tensor1_type,
@@ -280,8 +279,7 @@ struct nnapi_pipeline {
         dst = nnapi_tensor(c, a->type, false, true);
         dst.op_type.type = ggml_to_nnapi_type(a->type);
         if (dst.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            dst.op_type.scale = estimate_q80_output_scale(a, src0.op_type.scale,
-                                                            b, src1.op_type.scale);
+            dst.op_type.scale = estimate_q80_output_scale(a, src0.op_type.scale, src1.op_type.scale);
         }
 
         if (!build_mat_mul_model(&model,
@@ -762,24 +760,17 @@ static float tensor_q80_get_max_scale(const ggml_tensor * tensor) {
     return max_block_scale;
 }
 
-// TODO: Figure this out for NxM
-static float estimate_q80_output_scale(const ggml_tensor * src0, float src0_scale,
-                                       const ggml_tensor * src1, float src1_scale) {
+// TODO: This was determined by running NxM tests
+static float estimate_q80_output_scale(const ggml_tensor * src0, float scale0, float scale1) {
+    const auto K = static_cast<float>(src0->ne[0]);
+    const float max_int8_abs = 127.0f;
+    float max_abs_output = K * max_int8_abs * std::max(scale0, scale1);
 
-    float max_input_scale = std::max(src0_scale, src1_scale);
-    float max_abs_input_value = 127.0f * max_input_scale;
+    constexpr float clearance = 1.7f; // TODO: this currently needs to be larger for larger Ks
+    float estimated_abs_max = clearance * std::sqrt(max_abs_output);
+//    GGML_LOG_ERROR("estimated abs max output %f", estimated_abs_max);
 
-    int64_t max_dimension = std::max(src0->ne[0], src0->ne[1]);
-    max_dimension = std::max(max_dimension, src1->ne[0]);
-    max_dimension = std::max(max_dimension, src1->ne[1]);
-
-    float max_abs_output_value = static_cast<float>(max_dimension) * max_abs_input_value;
-
-//    GGML_LOG_ERROR("max_dimension %ld max abs input %f max_abs_output_value %f",
-//                   max_dimension, max_abs_input_value, max_abs_output_value);
-
-    // TODO: This is just a guess determined by experimentation which worked for NxN tests
-    return (2 * std::sqrt(max_abs_output_value)) / 127.0f;
+    return estimated_abs_max / max_int8_abs;
 }
 
 static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct ggml_tensor * dst) {
