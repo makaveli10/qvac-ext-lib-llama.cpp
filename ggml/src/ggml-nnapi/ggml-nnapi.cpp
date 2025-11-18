@@ -1004,7 +1004,41 @@ static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const 
             const struct ggml_tensor * src0 = op->src[0];
             const struct ggml_tensor * src1 = op->src[1];
 
-            // TODO: Return actual OPs we do support
+            // TODO: Implement heterogeneous input types
+            if (src0->type != src1->type) {
+                return false;
+            }
+
+            // TODO: Implement more types
+            switch(src0->type) {
+                case GGML_TYPE_F32:
+                case GGML_TYPE_F16:
+                case GGML_TYPE_Q8_0:
+                    break;
+                default:
+                    return false;
+            }
+
+            // TODO: Implement batching
+            if (src0->ne[2] != 1 ||
+                src0->ne[3] != 1 ||
+                src1->ne[2] != 1 ||
+                src1->ne[3] != 1) {
+                return false;
+            }
+
+            // TODO: Implement block partitioning
+            constexpr uint32_t max_nels_in = 3200 * 3200;
+            if (src0->ne[0] * src0->ne[0] > max_nels_in ||
+                src1->ne[0] * src1->ne[1] > max_nels_in) {
+                return false;
+            }
+
+            // TODO: Figure out max output
+            constexpr uint32_t max_nels_out = 4096 * 4096;
+            if (op->ne[0] * op->ne[1] > max_nels_out) {
+                return false;
+            }
 
 //            print_tensor_info("src0", src0);
 //            print_tensor_info("src1", src1);
@@ -1023,6 +1057,7 @@ static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const 
 //                          src0->ne[1],
 //                          ggml_is_contiguous(src1));
 
+            // TODO: Figure out if we can support non contiguous inputs
             return ggml_is_contiguous(src0) &&
                    ggml_is_contiguous(src1);
         }
