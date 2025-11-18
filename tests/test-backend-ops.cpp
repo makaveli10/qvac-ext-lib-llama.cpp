@@ -5791,22 +5791,40 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     std::vector<std::unique_ptr<test_case>> test_cases;
     std::default_random_engine rng(0);
 
-    // TODO: Make multiple tests work at once
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 128, 128, 128, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4, 4, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 16, 16, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 2048, 2048, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 32, 32, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 64, 64, 64, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 128, 128, 128, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 256, 256, 256, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 512, 512, 512, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 1024, 1024, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    // NxN
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 128, 128, 128, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4, 4, 4, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 16, 16, 16, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 2048, 2048, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 32, 32, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 64, 64, 64, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 128, 128, 128, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 256, 256, 256, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 512, 512, 512, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 1024, 1024, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 2048, 2048, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 3200, 3200, 3200, {1, 1}, {1, 1}, {0, 1, 2, 3}));
 
-    return test_cases;
+    // NxM
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 4, 4, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F32, GGML_TYPE_F32, 128, 128, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 4, 4, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 16, 16, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F16, 2048, 2048, 1, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 64, 64, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 128, 128, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 256, 256, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 512, 512, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 1024, 1024, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 2048, 2048, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 4096, 4096, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+
+    // TODO: Implement block partitioning
+    // test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 4608, 4608, 32, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    // test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 3328, 3328, 3328, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    // test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, 4096, 4096, 4096, {1, 1}, {1, 1}, {0, 1, 2, 3}));
 
     // unary ops
     for (ggml_type type : {GGML_TYPE_F16, GGML_TYPE_F32}) {
