@@ -177,10 +177,9 @@ public:
                 const auto *block = reinterpret_cast<const block_q8_0*>(block_start);
                 const float block_scale = GGML_FP16_TO_FP32(block->d);
                 for (size_t j = 0; j < blck_size; ++j) {
-                    // TODO: Make sure this works on NxM
                     size_t current_row = current_block / blocks_per_width;
                     size_t row_offset = (current_block % blocks_per_width) * blck_size + j;
-                    size_t index_transposed = row_offset * tensor->ne[0] + current_row;
+                    size_t index_transposed = row_offset * tensor->ne[1] + current_row;
                     map_int8[index_transposed] = static_cast<int8_t>(static_cast<float>(block->qs[j])*block_scale / op_type.scale);
                 }
             }
