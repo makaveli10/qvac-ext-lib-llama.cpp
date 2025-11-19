@@ -1038,6 +1038,14 @@ static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const 
             }
 
             // TODO: Implement block partitioning
+            if (src0->ne[0] > 4736 ||
+                src0->ne[1] > 4736 ||
+                src1->ne[0] > 4736 ||
+                src1->ne[1] > 4736) {
+                return false;
+            }
+
+            // TODO: Implement block partitioning
             constexpr uint32_t max_nels_in = 3200 * 3200;
             if (src0->ne[0] * src0->ne[0] > max_nels_in ||
                 src1->ne[0] * src1->ne[1] > max_nels_in) {
