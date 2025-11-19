@@ -52,11 +52,15 @@ public:
     int fd = -1;
     int64_t nels = 0;
     size_t size = 0;
+    bool flipped_dimensions = false;
+    std::string name;
 
     nnapi_tensor() = default;
 
     nnapi_tensor(const ggml_tensor * tensor, ggml_type pipeline_type,
                  bool flip_dimensions=false, bool is_output=false) {
+        flipped_dimensions = flip_dimensions;
+        name = std::string(tensor->name);
         if (flip_dimensions) {
             dimensions = {
                     1, // batch dimension
@@ -461,42 +465,97 @@ static void print_tensor_info(const char* name, const ggml_tensor * tensor) {
     }
 }
 
-static void print_ggml_f32_tensor(const ggml_tensor * tensor) {
+static void print_ggml_f32_tensor(const ggml_tensor * tensor, bool shorten=true) {
     std::stringstream ss;
-    uint32_t i = 0;
+
+    constexpr uint32_t short_print_count = 4;
+
+    auto *data = reinterpret_cast<float*>(tensor->data);
+
+    GGML_LOG_ERROR("🍄 ggml f32 %ld x %ld %s:", tensor->ne[0], tensor->ne[1], tensor->name);
+
+    if (tensor->type != GGML_TYPE_F32) {
+        GGML_LOG_ERROR("Wrong type %s", ggml_type_name(tensor->type));
+        return;
+    }
 
     for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
+        if (shorten && i01 >= short_print_count && i01 < tensor->ne[1] - short_print_count) {
+            if (i01 == short_print_count) {
+                GGML_LOG_INFO("[...],");
+            }
+            continue;
+        }
+
         for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
+            if (shorten && i00 >= short_print_count && i00 < tensor->ne[0] - short_print_count) {
+                if (i00 == short_print_count) {
+                    ss << "..., ";
+                }
+                continue;
+            }
+//            size_t index = i01 * tensor->ne[1] + i00;
+//            ss << data[index];
+
             const void *x = (char *) tensor->data
-                    + i00 * tensor->nb[0]
-                    + i01 * tensor->nb[1];
+                            + i00 * tensor->nb[0]
+                            + i01 * tensor->nb[1];
             const auto *the_float = static_cast<const float*>(x);
-            ss << *the_float << " ";
-            i++;
-            if (i % tensor->ne[0] == 0) {
-                GGML_LOG_INFO("%s", ss.str().c_str());
-                ss.str("");
-                ss.clear();
+            ss << *the_float;
+
+            if (i00 < tensor->ne[0] - 1) {
+                ss << ", ";
             }
         }
+        GGML_LOG_INFO("[%s],", ss.str().c_str());
+        ss.str("");
+        ss.clear();
     }
 }
 
-static void print_ggml_q80_tensor(const ggml_tensor * tensor, bool print_quantized) {
+static void print_ggml_q80_tensor(const ggml_tensor * tensor, bool print_quantized=false,
+                                  bool shorten=true) {
     std::stringstream ss;
+
+    constexpr uint32_t short_print_count = 4;
 
     size_t nbytes = ggml_nbytes(tensor);
     size_t type_size = ggml_type_size(tensor->type);
     size_t blck_size = ggml_blck_size(tensor->type); // == QK8_0
     size_t nblocks = nbytes / type_size;
 
+    const size_t blocks_per_width = tensor->ne[0] / QK8_0;
+
+    GGML_LOG_ERROR("🍄 ggml q8_0 %ld x %ld %s:", tensor->ne[0], tensor->ne[1], tensor->name);
+
+    if (tensor->type != GGML_TYPE_Q8_0) {
+        GGML_LOG_ERROR("Wrong type %s", ggml_type_name(tensor->type));
+        return;
+    }
+
     for (size_t current_block = 0; current_block < nblocks; current_block++) {
         size_t offset = current_block * type_size;
         const uint8_t *block_start = reinterpret_cast<uint8_t*>(tensor->data) + offset;
         const auto *block = reinterpret_cast<const block_q8_0*>(block_start);
 
+        size_t current_row = current_block / blocks_per_width;
+
+        if (shorten && current_row >= short_print_count && current_row < (size_t)tensor->ne[1] - short_print_count) {
+            if (current_row == short_print_count && current_block == current_row * blocks_per_width) {
+                GGML_LOG_INFO("[...],");
+            }
+            continue;
+        }
+
         const float block_scale = GGML_FP16_TO_FP32(block->d);
         for (size_t j = 0; j < blck_size; ++j) {
+            size_t current_column = (current_block % blocks_per_width) * blck_size + j;
+            if (shorten && current_column >= short_print_count && current_column < (size_t)tensor->ne[0] - short_print_count) {
+                if (current_column == short_print_count) {
+                    ss << "..., ";
+                }
+                continue;
+            }
             float dequantized = static_cast<float>(block->qs[j]) * block_scale;
             if (print_quantized) {
                 ss << static_cast<int>(block->qs[j]);
@@ -507,31 +566,65 @@ static void print_ggml_q80_tensor(const ggml_tensor * tensor, bool print_quantiz
                 ss << ", ";
             }
         }
-        GGML_LOG_INFO("[%s],", ss.str().c_str());
-        ss.str("");
-        ss.clear();
+
+        size_t next_row = (current_block + 1) / blocks_per_width;
+        if (next_row > current_row) {
+            GGML_LOG_INFO("[%s],", ss.str().c_str());
+            ss.str("");
+            ss.clear();
+        }
     }
 }
 
-static void print_nnapi_q80_tensor(const nnapi_tensor * tensor, bool print_quantized, float scale) {
+static void print_nnapi_q80_tensor(const nnapi_tensor * tensor, bool print_quantized=false,
+                                   bool shorten=true) {
     std::stringstream ss;
+
+    constexpr uint32_t short_print_count = 4;
 
     void* nnapi_map = mmap(nullptr, tensor->size, PROT_WRITE, MAP_SHARED, tensor->fd, 0);
     auto* nnapi_map_int8 = reinterpret_cast<int8_t*>(nnapi_map);
 
-    for (size_t x = 0; x < tensor->dimensions[2]; x++) {
-        for (size_t y = 0; y < tensor->dimensions[3]; ++y) {
-            size_t index = x * tensor->dimensions[2] + y;
+    uint32_t N = 0;
+    uint32_t M = 0;
+    if (tensor->flipped_dimensions) {
+        N = tensor->dimensions[3];
+        M = tensor->dimensions[2];
+    } else {
+        N = tensor->dimensions[2];
+        M = tensor->dimensions[3];
+    }
 
+    GGML_LOG_ERROR("🍄 nnapi q8_0 %d x %d %s:", N, M, tensor->name.c_str());
+    for (size_t x = 0; x < N; x++) {
+        if (shorten && x >= short_print_count && x < N - short_print_count) {
+            if (x == short_print_count) {
+                GGML_LOG_INFO("[...],");
+            }
+            continue;
+        }
+
+        for (size_t y = 0; y < M; ++y) {
+            if (shorten && y >= short_print_count && y < M - short_print_count) {
+                if (y == short_print_count) {
+                    ss << "..., ";
+                }
+                continue;
+            }
+
+            size_t index = x * M + y;
             if (print_quantized) {
-                ss << static_cast<int>(nnapi_map_int8[index]) << " ";
+                ss << static_cast<int>(nnapi_map_int8[index]);
             } else {
-                float dequantized = static_cast<float>(nnapi_map_int8[index]) * scale;
-                ss << dequantized << " ";
+                float dequantized = static_cast<float>(nnapi_map_int8[index]) * tensor->op_type.scale;
+                ss << dequantized;
+            }
+            if (y < M - 1) {
+                ss << ", ";
             }
         }
 
-        GGML_LOG_INFO("%s", ss.str().c_str());
+        GGML_LOG_INFO("[%s],", ss.str().c_str());
         ss.str("");
         ss.clear();
     }
