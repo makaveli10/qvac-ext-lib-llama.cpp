@@ -1303,7 +1303,10 @@ void android_main(android_app* state) {
     ANativeActivity* activity = state->activity;
 
     // Params
-    std::string gguf_file_name = "Qwen3_0.6B.Q8_0.gguf";
+    std::string gguf_file_name =
+            "Qwen3_0.6B.Q8_0.gguf"
+//            "tinyllama-1.1-f16.gguf"
+            ;
     // std::string gguf_file_name = "gemma-3-1b-it-Q4_0.gguf";
     std::string prompt = "What is the tallest building in the world?";
 
@@ -1329,7 +1332,9 @@ void android_main(android_app* state) {
     std::vector<const char*> args = {
             "llama-cli", "-m",
             strdup(gguf_path.string().c_str()),
-            "-ngl", "999", "-p", prompt.c_str()
+            "-c", "0",
+            "-n", "256",
+            "-ngl", "0", "-p", prompt.c_str()
     };
 
     main(args.size(), const_cast<char **>(args.data()));
