@@ -55,7 +55,7 @@ public:
 
     nnapi_tensor() = default;
 
-    nnapi_tensor(const ggml_tensor * tensor, ggml_type type_for_size,
+    nnapi_tensor(const ggml_tensor * tensor, ggml_type pipeline_type,
                  bool flip_dimensions=false, bool is_output=false) {
         if (flip_dimensions) {
             dimensions = {
@@ -74,7 +74,7 @@ public:
         }
 
         op_type = {
-            .type = ggml_to_nnapi_type(tensor->type),
+            .type = ggml_to_nnapi_type(pipeline_type),
             .dimensionCount = static_cast<uint32_t>(dimensions.size()),
             .dimensions = dimensions.data(),
             .scale = 0.0f,
@@ -84,10 +84,10 @@ public:
         nels = ggml_nelements(tensor);
 
         size_t element_size = 0;
-        switch (type_for_size) {
+        switch (pipeline_type) {
             case GGML_TYPE_F32:
             case GGML_TYPE_F16:
-                element_size = ggml_type_size(type_for_size);
+                element_size = ggml_type_size(pipeline_type);
                 break;
             case GGML_TYPE_Q8_0:
                 element_size = sizeof(int8_t);
@@ -188,7 +188,17 @@ public:
                 for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
                     size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
                     if (tensor->type == GGML_TYPE_F32) {
-                        reinterpret_cast<float*>(map)[index_linear] = *reinterpret_cast<const float *>(&data[index_transposed]);
+                        if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT32) {
+                            reinterpret_cast<float*>(map)[index_linear] = *reinterpret_cast<const float *>(&data[index_transposed]);
+                        } else if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT16) {
+                            reinterpret_cast<_Float16*>(map)[index_linear] = static_cast<_Float16>(*reinterpret_cast<const float *>(&data[index_transposed]));
+                        } else if (op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+                            float unquantized = *reinterpret_cast<const float *>(&data[index_transposed]);
+                            reinterpret_cast<int8_t*>(map)[index_linear] = static_cast<int8_t>(unquantized / op_type.scale);
+                        } else {
+                            // TODO: Not supported
+                            assert(false);
+                        }
                     } else if (tensor->type == GGML_TYPE_F16) {
                         reinterpret_cast<_Float16*>(map)[index_linear] = *reinterpret_cast<const _Float16 *>(&data[index_transposed]);
                     }
@@ -270,7 +280,7 @@ struct nnapi_pipeline {
             src0.op_type.scale = tensor_q80_get_max_scale(a);
         }
 
-        src1 = nnapi_tensor(b, b->type, false, false);
+        src1 = nnapi_tensor(b, a->type, false, false);
         if (src1.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
             src1.op_type.scale = tensor_q80_get_max_scale(b);
         }
@@ -1005,7 +1015,7 @@ static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const 
             const struct ggml_tensor * src1 = op->src[1];
 
             // TODO: Implement heterogeneous input types
-            if (src0->type != src1->type) {
+            if (src0->type != src1->type && src1->type != GGML_TYPE_F32) {
                 return false;
             }
 
