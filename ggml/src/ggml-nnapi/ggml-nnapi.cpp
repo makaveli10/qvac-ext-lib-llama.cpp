@@ -256,7 +256,7 @@ public:
     }
 };
 
-static float tensor_q80_get_max_scale(const ggml_tensor * tensor);
+static float tensor_get_max_scale(const ggml_tensor * tensor);
 static float estimate_q80_output_scale(const ggml_tensor * src0, float scale0, float scale1);
 static bool build_mat_mul_model(ANeuralNetworksModel** model,
                                 ANeuralNetworksOperandType *in_tensor0_type,
@@ -277,12 +277,12 @@ struct nnapi_pipeline {
                    const struct ggml_tensor * c) {
         src0 = nnapi_tensor(a, a->type, true, false);
         if (src0.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            src0.op_type.scale = tensor_q80_get_max_scale(a);
+            src0.op_type.scale = tensor_get_max_scale(a);
         }
 
         src1 = nnapi_tensor(b, a->type, false, false);
         if (src1.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            src1.op_type.scale = tensor_q80_get_max_scale(b);
+            src1.op_type.scale = tensor_get_max_scale(b);
         }
 
         // Set NNAPI output dtype to match input, we will be converting to f32 later
@@ -757,17 +757,35 @@ static bool dispatch_model(ANeuralNetworksCompilation* compilation,
     return true;
 }
 
-static float tensor_q80_get_max_scale(const ggml_tensor * tensor) {
+static float tensor_get_max_scale(const ggml_tensor * tensor) {
     const uint8_t *ggml_raw = reinterpret_cast<uint8_t*>(tensor->data);
-    constexpr size_t type_size = sizeof(block_q8_0);
-    const size_t nblocks = ggml_nbytes(tensor) / type_size;
-    float max_block_scale = std::numeric_limits<float>::min();
 
-    for (size_t current_block = 0; current_block < nblocks; current_block++) {
-        const auto *block = reinterpret_cast<const block_q8_0*>(ggml_raw + current_block * type_size);
-        max_block_scale = std::max(max_block_scale, GGML_FP16_TO_FP32(block->d));
+    switch (tensor->type) {
+        case GGML_TYPE_Q8_0: {
+            constexpr size_t type_size = sizeof(block_q8_0);
+            const size_t nblocks = ggml_nbytes(tensor) / type_size;
+            float max_block_scale = std::numeric_limits<float>::min();
+
+            for (size_t current_block = 0; current_block < nblocks; current_block++) {
+                const auto *block = reinterpret_cast<const block_q8_0*>(ggml_raw + current_block * type_size);
+                max_block_scale = std::max(max_block_scale, GGML_FP16_TO_FP32(block->d));
+            }
+            return max_block_scale;
+        }
+        case GGML_TYPE_F32: {
+            const float *data_f32 = reinterpret_cast<float*>(tensor->data);
+            float max_value = *std::max_element(data_f32, data_f32 + ggml_nelements(tensor));
+            return max_value / 127.0f;
+        }
+        case GGML_TYPE_F16: {
+            const _Float16 *data_f16 = reinterpret_cast<_Float16*>(tensor->data);
+            float max_value = *std::max_element(data_f16, data_f16 + ggml_nelements(tensor));
+            return max_value / 127.0f;
+        }
+        default:
+            GGML_LOG_ERROR("Unsupported type %s", ggml_type_name(tensor->type));
+            assert(false);
     }
-    return max_block_scale;
 }
 
 // TODO: This was determined by running NxM tests
