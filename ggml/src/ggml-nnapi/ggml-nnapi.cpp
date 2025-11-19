@@ -182,9 +182,10 @@ public:
                 const float block_scale = GGML_FP16_TO_FP32(block->d);
                 for (size_t j = 0; j < blck_size; ++j) {
                     size_t current_row = current_block / blocks_per_width;
-                    size_t row_offset = (current_block % blocks_per_width) * blck_size + j;
-                    size_t index_transposed = row_offset * tensor->ne[1] + current_row;
-                    map_int8[index_transposed] = static_cast<int8_t>(static_cast<float>(block->qs[j])*block_scale / op_type.scale);
+                    size_t current_column = (current_block % blocks_per_width) * blck_size + j;
+                    size_t index_transposed = current_column * tensor->ne[1] + current_row;
+                    float dequantized = static_cast<float>(block->qs[j])*block_scale;
+                    map_int8[index_transposed] = static_cast<int8_t>(dequantized / op_type.scale);
                 }
             }
         } else {
@@ -233,11 +234,12 @@ public:
         if (op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
             auto *dst_float = reinterpret_cast<float*>(tensor->data);
             auto *nnapi_src = reinterpret_cast<int8_t*>(map);
-            // TODO: Why is this transposed dimension order different than below?
+
+            // TODO: Make this more similar to float
             for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
                 for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
-                    size_t index = i00 * tensor->ne[0] + i01;
-                    dst_float[index_linear] = static_cast<float>(nnapi_src[index]) * op_type.scale;
+                    size_t index_transposed = i01 + i00 * tensor->ne[1];
+                    dst_float[index_linear] = static_cast<float>(nnapi_src[index_transposed]) * op_type.scale;
                     index_linear++;
                 }
             }
