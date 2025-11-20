@@ -43,6 +43,7 @@ static std::pair<int, ANeuralNetworksMemory*> create_shared_memory(
     return {fd, memory};
 }
 
+static const char *operand_code_str (OperandCode code);
 
 class nnapi_tensor {
 public:
@@ -297,6 +298,19 @@ struct nnapi_pipeline {
         if (dst.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
             dst.op_type.scale = estimate_q80_output_scale(a, src0.op_type.scale, src1.op_type.scale);
         }
+
+//        GGML_LOG_ERROR("%s: %d x %d (%ld -> %ld). scale %f",
+//                       operand_code_str((OperandCode)src0.op_type.type),
+//                       src0.dimensions[2], src0.dimensions[3], src0.nels, src0.size,
+//                       src0.op_type.scale);
+//        GGML_LOG_ERROR("%s: %d x %d (%ld -> %ld). scale %f",
+//                       operand_code_str((OperandCode)src1.op_type.type),
+//                       src1.dimensions[2], src1.dimensions[3], src1.nels, src1.size,
+//                       src1.op_type.scale);
+//        GGML_LOG_ERROR("%s: %d x %d (%ld -> %ld). scale %f",
+//                       operand_code_str((OperandCode)dst.op_type.type),
+//                       dst.dimensions[2], dst.dimensions[3], dst.nels, dst.size,
+//                       dst.op_type.scale);
 
         if (!build_mat_mul_model(&model,
                                  &src0.op_type,
@@ -638,6 +652,16 @@ static bool build_mat_mul_model(ANeuralNetworksModel** model,
                                 ANeuralNetworksOperandType *in_tensor0_type,
                                 ANeuralNetworksOperandType *in_tensor1_type,
                                 ANeuralNetworksOperandType *out_tensor_type) {
+
+//    const uint32_t m = in_tensor0_type->dimensions[2];
+//    const uint32_t n = in_tensor1_type->dimensions[3];
+//    const uint32_t k = in_tensor1_type->dimensions[2];
+//    GGML_LOG_ERROR("Building model: %d x %d @ %d x %d -> %d x %d (%d, %d, %d)",
+//                   in_tensor0_type->dimensions[2], in_tensor0_type->dimensions[3],
+//                   in_tensor1_type->dimensions[2], in_tensor1_type->dimensions[3],
+//                   out_tensor_type->dimensions[2], out_tensor_type->dimensions[3],
+//                   m, n, k);
+
     int ret = ANeuralNetworksModel_create(model);
     if (ret != ANEURALNETWORKS_NO_ERROR) {
         GGML_LOG_ERROR("ANeuralNetworksModel_create failed");
@@ -906,13 +930,34 @@ static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct 
                                                                               src0->type);
     // TODO: do this even earlier
     if (!ctx->pipelines.count(op_tuple)) {
+//        const int64_t m = src0->ne[1];
+//        const int64_t n = src1->ne[1];
+//        const int64_t k = src1->ne[0];
+//        GGML_LOG_ERROR("Building pipeline for: %ld x %ld @ %ld x %ld -> %ld x %ld (%ld, %ld, %ld)",
+//                       m, k, k, n, m, n, m, n, k);
+
         auto p = std::make_unique<nnapi_pipeline>(src0, src1, dst);
         ctx->pipelines.emplace(op_tuple, std::move(p));
     }
     nnapi_pipeline *pipeline = ctx->pipelines.at(op_tuple).get();
 
+//    if (src0->type == GGML_TYPE_F32) {
+//        print_ggml_f32_tensor(src0);
+//    } else if (src0->type == GGML_TYPE_Q8_0) {
+//        print_ggml_q80_tensor(src0, false, false);
+//    }
+
+//    if (src0->type == GGML_TYPE_F32) {
+//        print_ggml_f32_tensor(src1);
+//    } else if (src0->type == GGML_TYPE_Q8_0) {
+//        print_ggml_q80_tensor(src1, false, false);
+//    }
+
     pipeline->src0.write(src0);
     pipeline->src1.write_transposed(src1);
+
+//    print_nnapi_q80_tensor(&pipeline->src0, false, false);
+//    print_nnapi_q80_tensor(&pipeline->src1, false, false);
 
     if (!dispatch_model(pipeline->compilation,
                         &pipeline->src0,
@@ -922,7 +967,11 @@ static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct 
         return;
     }
 
+//    print_nnapi_q80_tensor(&pipeline->dst, false, false);
+
     pipeline->dst.read_transposed(dst);
+
+//    print_ggml_f32_tensor(dst);
 }
 
 
@@ -1121,11 +1170,23 @@ static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const 
 //    GGML_LOG_WARN("Testing NNAPI device for tensor %s (op %s) on ctx %p",
 //                  op->name, ggml_op_name(op->op), dev->context);
 
+//    return false;
+
     switch (op->op) {
         case GGML_OP_MUL_MAT:
         {
             const struct ggml_tensor * src0 = op->src[0];
             const struct ggml_tensor * src1 = op->src[1];
+
+//            {
+//                const int64_t m = src0->ne[1];
+//                const int64_t n = src1->ne[1];
+//                const int64_t k = src1->ne[0];
+//                GGML_LOG_WARN("Want to run MUL_MAT: %ld x %ld @ %ld x %ld -> %ld x %ld (%ld, %ld, %ld)",
+//                              m, k, k, n, m, n, m, n, k);
+//                return false;
+//            }
+
 
             // TODO: Implement heterogeneous input types
             if (src0->type != src1->type && src1->type != GGML_TYPE_F32) {
@@ -1187,6 +1248,12 @@ static bool ggml_backend_nnapi_device_supports_op(ggml_backend_dev_t dev, const 
 //                          ggml_op_symbol(src1->op),
 //                          src0->ne[1],
 //                          ggml_is_contiguous(src1));
+
+//            const int64_t m = src0->ne[1];
+//            const int64_t n = src1->ne[1];
+//            const int64_t k = src1->ne[0];
+//            GGML_LOG_WARN("Will run on NNAPI: %ld x %ld @ %ld x %ld -> %ld x %ld (%ld, %ld, %ld)",
+//                          m, k, k, n, m, n, m, n, k);
 
             // TODO: Figure out if we can support non contiguous inputs
             return ggml_is_contiguous(src0) &&
