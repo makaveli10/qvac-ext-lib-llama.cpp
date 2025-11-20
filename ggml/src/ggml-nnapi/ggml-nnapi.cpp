@@ -786,7 +786,7 @@ static void check_device_support_for_model(ggml_backend_nnapi_context * ctx,
         int ret = ANeuralNetworksDevice_getName(device, &name);
         if (ret != ANEURALNETWORKS_NO_ERROR) {
             GGML_LOG_ERROR("Failed to ANeuralNetworksDevice_getName for device %p", (void*) device);
-            return;
+            continue;
         }
 
         bool is_first_op_supported = false;
@@ -795,8 +795,18 @@ static void check_device_support_for_model(ggml_backend_nnapi_context * ctx,
                                                                     1, &is_first_op_supported);
         if (ret != ANEURALNETWORKS_NO_ERROR) {
             GGML_LOG_ERROR("ANeuralNetworksModel_getSupportedOperationsForDevices failed");
-            return;
+            continue;
         }
+
+        ANeuralNetworksCompilation* compilation = nullptr;
+        const ANeuralNetworksDevice* devices[] = { device };
+        ret = ANeuralNetworksCompilation_createForDevices(model, devices, 1, &compilation);
+        if (ret != ANEURALNETWORKS_NO_ERROR) {
+            GGML_LOG_ERROR("ANeuralNetworksCompilation_createForDevices failed");
+            GGML_LOG_INFO("%s: supported %d", name, false);
+            continue;
+        }
+        ANeuralNetworksCompilation_free(compilation);
 
         GGML_LOG_INFO("%s: supported %d", name, is_first_op_supported);
     }
@@ -974,13 +984,57 @@ static void ggml_backend_nnapi_mul_mat(ggml_backend_nnapi_context * ctx, struct 
 //    print_ggml_f32_tensor(dst);
 }
 
+static void check_device_op_support(ggml_backend_nnapi_context * ctx, OperandCode type,
+                                    uint32_t m, uint32_t n, uint32_t k) {
+    uint32_t src0_d[] = {1, 1, m, k};
+    ANeuralNetworksOperandType src0 = {
+            .type = type,
+            .dimensionCount = 4,
+            .dimensions = src0_d,
+            .scale = 0.0f,
+            .zeroPoint = 0,
+    };
+    if (type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+        src0.scale = 1.0f;
+    }
+
+    uint32_t src1_d[] = {1, 1, k, n};
+    ANeuralNetworksOperandType src1 = {
+            .type = type,
+            .dimensionCount = 4,
+            .dimensions = src1_d,
+            .scale = 0.0f,
+            .zeroPoint = 0,
+    };
+    if (type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+        src1.scale = 1.0f;
+    }
+
+    uint32_t dst_d[] = {1, 1, m, n};
+    ANeuralNetworksOperandType dst = {
+            .type = type,
+            .dimensionCount = 4,
+            .dimensions = dst_d,
+            .scale = 0.0f,
+            .zeroPoint = 0,
+    };
+    if (type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+        dst.scale = 1.0f;
+    }
+
+    ANeuralNetworksModel* model = nullptr;
+    if (!build_mat_mul_model(&model, &src0, &src1, &dst)) {
+        GGML_LOG_ERROR("Failed to build the mat mul model for type %s",
+                       operand_code_str(type));
+    }
+
+    GGML_LOG_INFO("%d x %d @ %d x %d -> %d x %d (%d, %d, %d) (%s)",
+                  m, k, k, n, m, n, m, n, k, operand_code_str(type));
+    check_device_support_for_model(ctx, model);
+    ANeuralNetworksModel_free(model);
+}
 
 static void print_device_model_support(ggml_backend_nnapi_context * ctx) {
-    static constexpr uint32_t dimension_length = 4;
-    static constexpr uint32_t tensor_size = dimension_length * dimension_length;
-
-    uint32_t dimensions[] = {dimension_length, dimension_length};
-
     // supported types for matmul
     std::vector<OperandCode> types_to_test = {
             ANEURALNETWORKS_TENSOR_FLOAT16,
@@ -990,29 +1044,10 @@ static void print_device_model_support(ggml_backend_nnapi_context * ctx) {
     };
 
     for (OperandCode tensor_type_code : types_to_test) {
-        ANeuralNetworksOperandType tensor_type = {
-                .type = tensor_type_code,
-                .dimensionCount = sizeof(dimensions) / sizeof(dimensions[0]),
-                .dimensions = dimensions,
-                .scale = 0.0f,
-                .zeroPoint = 0,
-        };
-
-        if (tensor_type_code == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
-            tensor_type.scale = 1.0f;
-        }
-
-        ANeuralNetworksModel* model = nullptr;
-        if (!build_mat_mul_model(&model, &tensor_type, &tensor_type, &tensor_type)) {
-            GGML_LOG_ERROR("Failed to build the mat mul model for type %s",
-                           operand_code_str(tensor_type_code));
-            continue;
-        }
-
-        GGML_LOG_INFO("Testing model type %s", operand_code_str(tensor_type_code));
-        check_device_support_for_model(ctx, model);
-        ANeuralNetworksModel_free(model);
+        check_device_op_support(ctx, tensor_type_code, 4, 4, 4);
     }
+
+    check_device_op_support(ctx, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED, 2048, 17, 1024);
 }
 
 // backend interface
