@@ -189,7 +189,27 @@ public:
                     map_int8[index_transposed] = static_cast<int8_t>(dequantized / op_type.scale);
                 }
             }
-        } else {
+        } else if (flipped_dimensions && tensor->type == GGML_TYPE_F32) {
+            const uint64_t n_elements = ggml_nelements(tensor);
+            const float * src_data = reinterpret_cast<const float *>(tensor->data);
+
+            if (op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
+                auto * dst_data = reinterpret_cast<int8_t*>(map);
+                const float inv_scale = 1.0f / op_type.scale;
+
+                for (uint64_t i = 0; i < n_elements; ++i) {
+                    float val = src_data[i] * inv_scale;
+                    dst_data[i] = static_cast<int8_t>(std::clamp(std::round(val), -128.0f, 127.0f));
+                }
+            } else if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT32) {
+                 memcpy(map, src_data, size);
+            } else if (op_type.type == ANEURALNETWORKS_TENSOR_FLOAT16) {
+                auto * dst_data = reinterpret_cast<_Float16*>(map);
+                for (uint64_t i = 0; i < n_elements; ++i) {
+                    dst_data[i] = static_cast<_Float16>(src_data[i]);
+                }
+            }
+        }  else {
             for (int64_t i00 = 0; i00 < tensor->ne[0]; i00++) {
                 for (int64_t i01 = 0; i01 < tensor->ne[1]; i01++) {
                     size_t index_transposed = i00 * tensor->nb[0] + i01 * tensor->nb[1];
@@ -268,7 +288,8 @@ static float estimate_q80_output_scale(const ggml_tensor * src0, float scale0, f
 static bool build_mat_mul_model(ANeuralNetworksModel** model,
                                 ANeuralNetworksOperandType *in_tensor0_type,
                                 ANeuralNetworksOperandType *in_tensor1_type,
-                                ANeuralNetworksOperandType *out_tensor_type);
+                                ANeuralNetworksOperandType *out_tensor_type,
+                                bool adj_y_value);
 static bool compile_model(ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation);
 
 struct nnapi_pipeline {
@@ -287,7 +308,8 @@ struct nnapi_pipeline {
             src0.op_type.scale = tensor_get_max_scale(a);
         }
 
-        src1 = nnapi_tensor(b, a->type, false, false);
+        bool transpose_src1 = (b->type == GGML_TYPE_F32);
+        src1 = nnapi_tensor(b, a->type, transpose_src1, false);
         if (src1.op_type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED) {
             src1.op_type.scale = tensor_get_max_scale(b);
         }
@@ -315,7 +337,8 @@ struct nnapi_pipeline {
         if (!build_mat_mul_model(&model,
                                  &src0.op_type,
                                  &src1.op_type,
-                                 &dst.op_type)) {
+                                 &dst.op_type,
+                                 transpose_src1)) {
             GGML_LOG_ERROR("Failed to build the mat mul model");
             return;
         }
@@ -651,7 +674,8 @@ static void print_nnapi_q80_tensor(const nnapi_tensor * tensor, bool print_quant
 static bool build_mat_mul_model(ANeuralNetworksModel** model,
                                 ANeuralNetworksOperandType *in_tensor0_type,
                                 ANeuralNetworksOperandType *in_tensor1_type,
-                                ANeuralNetworksOperandType *out_tensor_type) {
+                                ANeuralNetworksOperandType *out_tensor_type,
+                                bool transpose_b) {
 
 //    const uint32_t m = in_tensor0_type->dimensions[2];
 //    const uint32_t n = in_tensor1_type->dimensions[3];
@@ -702,10 +726,10 @@ static bool build_mat_mul_model(ANeuralNetworksModel** model,
                        adj_y);
         return false;
     }
-    bool adj_y_value = false;
+    bool adj_y_value = transpose_b;
     ret = ANeuralNetworksModel_setOperandValue(
-            *model, (int32_t) adj_y, &adj_y_value,
-            sizeof(adj_y_value));
+        *model, (int32_t) adj_y, &adj_y_value,
+        sizeof(adj_y_value));
     if (ret != ANEURALNETWORKS_NO_ERROR) {
         GGML_LOG_ERROR("ANeuralNetworksModel_setOperandValue failed for operand (%d)",
                        adj_y);
@@ -1023,7 +1047,7 @@ static void check_device_op_support(ggml_backend_nnapi_context * ctx, OperandCod
     }
 
     ANeuralNetworksModel* model = nullptr;
-    if (!build_mat_mul_model(&model, &src0, &src1, &dst)) {
+    if (!build_mat_mul_model(&model, &src0, &src1, &dst, false)) {
         GGML_LOG_ERROR("Failed to build the mat mul model for type %s",
                        operand_code_str(type));
     }

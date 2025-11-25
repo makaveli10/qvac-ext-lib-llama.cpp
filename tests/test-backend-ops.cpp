@@ -5849,20 +5849,22 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 512, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 512, 3072, {1, 1}, {1, 1}, {0, 1, 2, 3}));
 
-    // TODO: fail in NMSE check (debug / fix)
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 1, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 2, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 512, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 1, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 2, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 1, 3072, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 2, 3072, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 2048, 1, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 2048, 2, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 2048, 512, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 3072, 1, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 3072, 2, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 3072, 512, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    // TODO: fail in NMSE check (debug / fix) - Are now passing with Transpose trick (adj_y=true) for src_1(F32)
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 1, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 2, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 512, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 1, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 2, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 1, 3072, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 2, 3072, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 2048, 1, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 2048, 2, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 2048, 512, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 3072, 1, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 3072, 2, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+
+    // Memory limit? Fallback to the CPU
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 3072, 512, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
 
     // TODO: fail to compile on NPU (figure out why and skip / fix)
 //    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q8_0, GGML_TYPE_F32, 1024, 17, 1024, {1, 1}, {1, 1}, {0, 1, 2, 3}));
@@ -5881,9 +5883,9 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F32, 2048, 512, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F32, 256, 512, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
 
-    // TODO: fail in NMSE check (debug / fix)
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F32, 2048, 1, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
-//    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F32, 256, 1, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    // TODO: fail in NMSE check (debug / fix) - Are now passing with Transpose trick (adj_y=true) for src_1(F32)
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F32, 2048, 1, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F32, 256, 1, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
 
     // TODO: fail to compile on NPU (figure out why and skip / fix)
 //    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_F16, GGML_TYPE_F32, 2048, 11, 2048, {1, 1}, {1, 1}, {0, 1, 2, 3}));
