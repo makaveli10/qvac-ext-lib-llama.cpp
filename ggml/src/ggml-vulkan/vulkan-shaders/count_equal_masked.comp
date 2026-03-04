@@ -19,11 +19,8 @@ void main() {
     const uint base = gl_WorkGroupID.x * CHUNK_SIZE;
     const uint col = gl_LocalInvocationID.x;
 
-    if (gl_WorkGroupID.x == 0 && gl_LocalInvocationID.x == 0) {
-        data_d[0] = D_TYPE(0);
-    }
-
-    barrier();
+    // The output buffer is zeroed by the host before dispatch via ggml_vk_buffer_memset_async.
+    // Do NOT zero data_d[0] here - it would race with atomicAdds from other workgroups.
 
     uint count = 0;
     [[unroll]]
