@@ -2018,11 +2018,9 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_out_prod(ggml_me
     snprintf(name, 256, "%s", base);
 
     ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
-    if (res) {
-        return res;
+    if (!res.pipeline) {
+        res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
     }
-
-    res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
 
     return res;
 }
@@ -2040,11 +2038,9 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_silu_back(ggml_m
     snprintf(name, 256, "%s", base);
 
     ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
-    if (res) {
-        return res;
+    if (!res.pipeline) {
+        res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
     }
-
-    res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
 
     return res;
 }
@@ -2061,13 +2057,11 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_soft_max_back(gg
     snprintf(name, 256, "%s", base);
 
     ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
-    if (res) {
-        return res;
+    if (!res.pipeline) {
+        res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
     }
 
-    res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
-
-    ggml_metal_pipeline_set_smem(res, 32*sizeof(float));
+    res.smem = 32*sizeof(float);
 
     return res;
 }
@@ -2083,13 +2077,11 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_rms_norm_back(gg
     snprintf(name, 256, "%s", base);
 
     ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
-    if (res) {
-        return res;
+    if (!res.pipeline) {
+        res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
     }
 
-    res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
-
-    ggml_metal_pipeline_set_smem(res, 2*32*sizeof(float));
+    res.smem = 2*32*sizeof(float);
 
     return res;
 }
