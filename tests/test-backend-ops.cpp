@@ -7414,6 +7414,13 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         }
     }
 
+    // Test m=1, n=64 — exercises mat-mat path for small m with all types (regression test for coopmat2 pipeline selection)
+    for (ggml_type type_a : all_types) {
+        test_cases.emplace_back(new test_mul_mat(type_a, GGML_TYPE_F32, 1, 64, 256, {1, 1}, {1, 1}));
+    }
+    // Also test m=1, n=2048 large N
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q4_0, GGML_TYPE_F32, 1, 2048, 8192, {1, 1}, {1, 1}));
+
 #if 0
     {
         // Test paths in OpenCL
