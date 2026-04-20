@@ -241,6 +241,9 @@ struct gguf_bytes_reader {
     /// @return The current position after alignment, or 0 on error.
     virtual size_t align(size_t alignment) = 0;
 
+    /// @brief Returns the number of bytes remaining in the stream.
+    virtual size_t get_remain() = 0;
+
     virtual ~gguf_bytes_reader() = 0;
 };
 
@@ -270,6 +273,16 @@ struct gguf_bytes_buffer_reader : public gguf_bytes_reader {
         return offset;
     }
 
+    size_t get_remain() override {
+        auto result = streambuf.pubseekoff(0, std::ios_base::end, std::ios_base::in);
+        if (result == std::streampos(-1)) {
+            return 0;
+        }
+        size_t remain = static_cast<size_t>(result) - offset;
+        streambuf.pubseekoff(offset, std::ios_base::beg, std::ios_base::in);
+        return remain;
+    }
+
   private:
     std::basic_streambuf<char> & streambuf;
     size_t                       offset;
@@ -289,6 +302,24 @@ struct gguf_bytes_file_reader : public gguf_bytes_reader {
         return ftell(file);
     }
 
+    size_t get_remain() override {
+        const int64_t cur = gguf_ftell(file);
+        if (cur < 0) {
+            return 0;
+        }
+        if (gguf_fseek(file, 0, SEEK_END) != 0) {
+            gguf_fseek(file, cur, SEEK_SET);
+            return 0;
+        }
+        const int64_t end = gguf_ftell(file);
+        if (end < 0) {
+            gguf_fseek(file, cur, SEEK_SET);
+            return 0;
+        }
+        gguf_fseek(file, cur, SEEK_SET);
+        return static_cast<size_t>(end - cur);
+    }
+
   private:
     FILE * file;
 };
@@ -297,7 +328,7 @@ struct gguf_bytes_file_reader : public gguf_bytes_reader {
 struct gguf_reader {
     gguf_bytes_reader& bytes_reader;
 
-    gguf_reader(gguf_bytes_reader& bytes_reader) : bytes_reader(bytes_reader) {}
+    gguf_reader(gguf_bytes_reader& bytes_reader) : bytes_reader(bytes_reader), nbytes_remain(bytes_reader.get_remain()) {}
 
     // helper for remaining bytes in a file
     static uint64_t file_remain(FILE * file) {
