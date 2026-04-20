@@ -101,6 +101,7 @@ static bool is_pow2(uint32_t x) { return x > 1 && (x & (x-1)) == 0; }
 #define VK_VENDOR_ID_INTEL 0x8086
 #define VK_VENDOR_ID_NVIDIA 0x10de
 #define VK_VENDOR_ID_QUALCOMM 0x5143
+#define VK_VENDOR_ID_ARM 0x13B5
 
 #define VK_DEVICE_DESCRIPTOR_POOL_SIZE 256
 
@@ -4871,6 +4872,7 @@ static vk_device ggml_vk_get_device(size_t idx) {
         }
 
         device->physical_device = physical_devices[dev_num];
+        const vk::PhysicalDeviceProperties dev_props = device->physical_device.getProperties();
         const std::vector<vk::ExtensionProperties> ext_props = device->physical_device.enumerateDeviceExtensionProperties();
 
         device->architecture = get_device_architecture(device->physical_device);
@@ -4914,7 +4916,7 @@ static vk_device ggml_vk_get_device(size_t idx) {
                 device->subgroup_size_control = true;
 #if defined(GGML_VULKAN_COOPMAT_GLSLC_SUPPORT)
             } else if (strcmp("VK_KHR_cooperative_matrix", properties.extensionName) == 0 &&
-                       !getenv("GGML_VK_DISABLE_COOPMAT")) {
+                       !(getenv("GGML_VK_DISABLE_COOPMAT") || dev_props.vendorID == VK_VENDOR_ID_ARM)) {
                 device->coopmat_support = true;
                 device->coopmat_m = 0;
                 device->coopmat_n = 0;
@@ -4922,7 +4924,7 @@ static vk_device ggml_vk_get_device(size_t idx) {
 #endif
 #if defined(GGML_VULKAN_COOPMAT2_GLSLC_SUPPORT)
             } else if (strcmp("VK_NV_cooperative_matrix2", properties.extensionName) == 0 &&
-                       !getenv("GGML_VK_DISABLE_COOPMAT2")) {
+                       !(getenv("GGML_VK_DISABLE_COOPMAT2") || dev_props.vendorID == VK_VENDOR_ID_ARM)) {
                 coopmat2_support = true;
 #endif
 #if defined(GGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT)
@@ -5102,7 +5104,7 @@ static vk_device ggml_vk_get_device(size_t idx) {
         device->subgroup_vote = (vk11_props.subgroupSupportedStages & vk::ShaderStageFlagBits::eCompute) &&
                                 (vk11_props.subgroupSupportedOperations & vk::SubgroupFeatureFlagBits::eVote);
 
-        const bool force_disable_f16 = getenv("GGML_VK_DISABLE_F16") != nullptr;
+        const bool force_disable_f16 = getenv("GGML_VK_DISABLE_F16") != nullptr || dev_props.vendorID == VK_VENDOR_ID_ARM;
 
         device->fp16 = !force_disable_f16 && fp16_storage && fp16_compute;
 
@@ -5691,12 +5693,12 @@ static void ggml_vk_print_gpu_info(size_t idx) {
             fp16_compute = true;
 #if defined(GGML_VULKAN_COOPMAT_GLSLC_SUPPORT)
        } else if (strcmp("VK_KHR_cooperative_matrix", properties.extensionName) == 0 &&
-                   !getenv("GGML_VK_DISABLE_COOPMAT")) {
+                   !(getenv("GGML_VK_DISABLE_COOPMAT") || dev_props.vendorID == VK_VENDOR_ID_ARM)) {
             coopmat_support = true;
 #endif
 #if defined(GGML_VULKAN_COOPMAT2_GLSLC_SUPPORT)
         } else if (strcmp("VK_NV_cooperative_matrix2", properties.extensionName) == 0 &&
-                   !getenv("GGML_VK_DISABLE_COOPMAT2")) {
+                   !(getenv("GGML_VK_DISABLE_COOPMAT2") || dev_props.vendorID == VK_VENDOR_ID_ARM)) {
             coopmat2_support = true;
 #endif
 #if defined(GGML_VULKAN_INTEGER_DOT_GLSLC_SUPPORT)
@@ -5713,9 +5715,10 @@ static void ggml_vk_print_gpu_info(size_t idx) {
     }
 
     const vk_device_architecture device_architecture = get_device_architecture(physical_device);
+    const vk::PhysicalDeviceProperties dev_props = physical_device.getProperties();
 
     const char* GGML_VK_DISABLE_F16 = getenv("GGML_VK_DISABLE_F16");
-    bool force_disable_f16 = GGML_VK_DISABLE_F16 != nullptr;
+    bool force_disable_f16 = GGML_VK_DISABLE_F16 != nullptr || dev_props.vendorID == VK_VENDOR_ID_ARM;
 
     bool fp16 = !force_disable_f16 && fp16_storage && fp16_compute;
 
