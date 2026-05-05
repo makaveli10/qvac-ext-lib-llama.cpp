@@ -8,8 +8,8 @@
 //   - Adreno 750 (Samsung Galaxy S25 Ultra) via the same code path
 //   - NVIDIA / Apple Metal / desktop Vulkan
 //
-// Pass:  llama_decode succeeds, embeddings are non-NaN.
-// Fail:  llama_decode returns < 0 (typically when the Vulkan submit returns
+// Pass:  llama_encode succeeds, embeddings are non-NaN.
+// Fail:  llama_encode returns < 0 (typically when the Vulkan submit returns
 //        VK_ERROR_DEVICE_LOST), or any embedding contains NaN/Inf.
 //
 // Usage: provide the gguf path either as argv[1] or via $LLAMACPP_TEST_MODELFILE.
@@ -132,7 +132,14 @@ int main(int argc, char ** argv) {
     // Mirror the addon-side test driver: pack sequences into a batch, flushing
     // when batch.n_tokens + next-seq would exceed n_batch, identical to
     // examples/embedding/embedding.cpp:290. The Mali DeviceLost fires on the
-    // very first llama_decode submit, so any chunking strategy reaches the bug.
+    // very first encoder submit, so any chunking strategy reaches the bug.
+    //
+    // bert is encoder-only; the addon goes through llama_encode (not
+    // llama_decode) and that is the path the Mali driver actually crashes
+    // on. Calling llama_decode here builds a different graph (causal mask,
+    // KV cache, decoder logits head) and incidentally avoids the bug,
+    // which is why this test was reporting PASS while the addon failed
+    // on the same shape.
     llama_batch batch = llama_batch_init(a.batch_size, /*embd*/ 0, /*n_seq_max*/ a.n_sequences);
     llama_memory_clear(llama_get_memory(ctx), true);
 
@@ -144,12 +151,12 @@ int main(int argc, char ** argv) {
     auto flush = [&]() {
         if (batch.n_tokens == 0) return true;
         fprintf(stderr,
-                "[mali-repro] submit #%d: llama_decode with %d tokens / %d sequences\n",
+                "[mali-repro] submit #%d: llama_encode with %d tokens / %d sequences\n",
                 submit_idx, batch.n_tokens, seq_in_batch);
-        const int rc = llama_decode(ctx, batch);
+        const int rc = llama_encode(ctx, batch);
         if (rc < 0) {
             fprintf(stderr,
-                    "[mali-repro] FAIL: llama_decode returned %d on submit #%d "
+                    "[mali-repro] FAIL: llama_encode returned %d on submit #%d "
                     "(this is the Mali Vulkan ErrorDeviceLost reproducer hit)\n",
                     rc, submit_idx);
             return false;
