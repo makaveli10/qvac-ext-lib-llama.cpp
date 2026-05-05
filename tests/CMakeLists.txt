@@ -253,6 +253,13 @@ llama_build_and_test(test-backend-sampler.cpp         LABEL "model")
 # except the affected Mali driver build.
 llama_build_and_test(test-mali-bert-batching.cpp      LABEL "model")
 
+# Repro for the Mali-G715 Vulkan grammar regression on Qwen3-0.6B-Q8_0.
+# The sampler picks a token whose decoded piece doesn't fit any active
+# stack in `root ::= ("yes" | "no")`, then llama_grammar_accept_token
+# throws "Unexpected empty grammar stack after accepting piece: ...".
+# Provide Qwen3-0.6B-Q8_0.gguf via $LLAMACPP_TEST_MODELFILE.
+llama_build_and_test(test-mali-grammar-empty-stack.cpp LABEL "model")
+
 # Test for state restore with fragmented KV cache
 llama_build_and_test(test-state-restore-fragmented.cpp LABEL "model" ARGS -m "${MODEL_DEST}")
 set_tests_properties(test-state-restore-fragmented PROPERTIES FIXTURES_REQUIRED test-download-model)
