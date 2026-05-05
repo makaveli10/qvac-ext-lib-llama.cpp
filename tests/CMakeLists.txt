@@ -247,6 +247,12 @@ target_include_directories(test-model-load-memory-split PRIVATE ${PROJECT_SOURCE
 llama_build_and_test(test-autorelease.cpp             LABEL "model")
 llama_build_and_test(test-backend-sampler.cpp         LABEL "model")
 
+# Repro for the Mali-G715 Vulkan first-submit ErrorDeviceLost on
+# gte-large_fp16 bert encoder at batch_size=1024 / 5 sequences.
+# Provide the GGUF via $LLAMACPP_TEST_MODELFILE; passes on every backend
+# except the affected Mali driver build.
+llama_build_and_test(test-mali-bert-batching.cpp      LABEL "model")
+
 # Test for state restore with fragmented KV cache
 llama_build_and_test(test-state-restore-fragmented.cpp LABEL "model" ARGS -m "${MODEL_DEST}")
 set_tests_properties(test-state-restore-fragmented PROPERTIES FIXTURES_REQUIRED test-download-model)
