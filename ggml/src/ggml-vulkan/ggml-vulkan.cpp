@@ -7256,7 +7256,8 @@ static vk_pipeline ggml_vk_guess_matmul_pipeline(ggml_backend_vk_context * ctx, 
     }
     if ((ctx->device->vendor_id == VK_VENDOR_ID_ARM || ctx->device->vendor_id == VK_VENDOR_ID_QUALCOMM) && ctx->device->coopmat_support && !ctx->device->coopmat2) {
         if (src0_type == GGML_TYPE_F16) {
-            return aligned ? mmp->a_l : mmp->l;
+            // Use small tile to avoid VK_ERROR_DEVICE_LOST (TDR) on large batches (e.g. BERT batch 2048)
+            return aligned ? mmp->a_s : mmp->s;
         }
     }
 
