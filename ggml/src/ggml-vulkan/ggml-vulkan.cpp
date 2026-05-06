@@ -684,6 +684,14 @@ struct vk_device_struct {
     vk_matmul_pipeline2 pipeline_matmul_f16;
     vk_matmul_pipeline2 pipeline_matmul_f16_f32;
 
+    // Parallel non-coopmat (Mali/Adreno only) shader slots for the f32×f32
+    // and f32×f16 matmul shapes. Populated alongside the coopmat1 slots when
+    // coopmat shaders are available so a per-context disable_coopmat flag
+    // can route encodes through scalar fp32 shaders without rebuilding the
+    // device. Empty on non-Mali/Adreno hardware (gate never picks them).
+    vk_matmul_pipeline pipeline_matmul_f32_nc {};
+    vk_matmul_pipeline pipeline_matmul_f32_f16_nc {};
+
     vk_matmul_pipeline2 pipeline_dequant_mul_mat_mat[GGML_TYPE_COUNT];
     vk_matmul_pipeline2 pipeline_dequant_mul_mat_mat_f16[GGML_TYPE_COUNT];
     vk_matmul_pipeline2 pipeline_dequant_mul_mat_mat_q8_1[GGML_TYPE_COUNT];
@@ -3406,6 +3414,12 @@ static void ggml_vk_load_shaders(vk_device& device) {
     if (!device->pipeline_matmul_f32_f16) {
         device->pipeline_matmul_f32_f16 = std::make_shared<vk_matmul_pipeline_struct>();
     }
+    if (!device->pipeline_matmul_f32_nc) {
+        device->pipeline_matmul_f32_nc = std::make_shared<vk_matmul_pipeline_struct>();
+    }
+    if (!device->pipeline_matmul_f32_f16_nc) {
+        device->pipeline_matmul_f32_f16_nc = std::make_shared<vk_matmul_pipeline_struct>();
+    }
     if (!device->pipeline_matmul_id_f32) {
         device->pipeline_matmul_id_f32 = std::make_shared<vk_matmul_pipeline_struct>();
     }
@@ -3681,6 +3695,28 @@ static void ggml_vk_load_shaders(vk_device& device) {
             CREATE_MM_F16_NC(pipeline_matmul_f16.f32acc,     matmul_f16);
             CREATE_MM_F16_NC(pipeline_matmul_f16_f32.f32acc, matmul_f16_f32);
 #undef CREATE_MM_F16_NC
+
+            // Parallel non-coopmat slots for f32×f32 / f32×f16 matmul. The
+            // coopmat slots above keep their _cm1 shaders; ggml_vk_get_*_pipeline
+            // routes here when ctx->disable_coopmat is set so per-context
+            // inference paths can skip coopmat without affecting other
+            // contexts on the same device.
+#define CREATE_MM_NC(TYPE, PIPELINE_NAME, NAMELC) \
+            if (device->mul_mat_l[TYPE]) { \
+                ggml_vk_create_pipeline(device, device-> PIPELINE_NAME ->l,   #NAMELC "_l",         NAMELC ## _fp32_len,         NAMELC ## _fp32_data,         "main", 3, sizeof(vk_mat_mat_push_constants), l_wg_denoms, l_warptile, 1,       false, false, 0); \
+                ggml_vk_create_pipeline(device, device-> PIPELINE_NAME ->a_l, #NAMELC "_aligned_l", NAMELC ## _aligned_fp32_len, NAMELC ## _aligned_fp32_data, "main", 3, sizeof(vk_mat_mat_push_constants), l_wg_denoms, l_warptile, l_align, false, false, 0); \
+            } \
+            if (device->mul_mat_m[TYPE]) { \
+                ggml_vk_create_pipeline(device, device-> PIPELINE_NAME ->m,   #NAMELC "_m",         NAMELC ## _fp32_len,         NAMELC ## _fp32_data,         "main", 3, sizeof(vk_mat_mat_push_constants), m_wg_denoms, m_warptile, 1,       false, false, 0); \
+                ggml_vk_create_pipeline(device, device-> PIPELINE_NAME ->a_m, #NAMELC "_aligned_m", NAMELC ## _aligned_fp32_len, NAMELC ## _aligned_fp32_data, "main", 3, sizeof(vk_mat_mat_push_constants), m_wg_denoms, m_warptile, m_align, false, false, 0); \
+            } \
+            if (device->mul_mat_s[TYPE]) { \
+                ggml_vk_create_pipeline(device, device-> PIPELINE_NAME ->s,   #NAMELC "_s",         NAMELC ## _fp32_len,         NAMELC ## _fp32_data,         "main", 3, sizeof(vk_mat_mat_push_constants), s_wg_denoms, s_warptile, 1,       false, false, 0); \
+                ggml_vk_create_pipeline(device, device-> PIPELINE_NAME ->a_s, #NAMELC "_aligned_s", NAMELC ## _aligned_fp32_len, NAMELC ## _aligned_fp32_data, "main", 3, sizeof(vk_mat_mat_push_constants), s_wg_denoms, s_warptile, s_align, false, false, 0); \
+            }
+            CREATE_MM_NC(GGML_TYPE_F32, pipeline_matmul_f32_nc,     matmul_f32_f32);
+            CREATE_MM_NC(GGML_TYPE_F32, pipeline_matmul_f32_f16_nc, matmul_f32_f16);
+#undef CREATE_MM_NC
         } else {
             CREATE_MM2(GGML_TYPE_F16, pipeline_matmul_f16, matmul_f16, wg_denoms, warptile, vk_mat_mat_push_constants, 3, );
             CREATE_MM2(GGML_TYPE_F16, pipeline_matmul_f16_f32, matmul_f16_f32, wg_denoms, warptile, vk_mat_mat_push_constants, 3, );
@@ -6189,17 +6225,30 @@ static vk_pipeline ggml_vk_get_to_fp16(ggml_backend_vk_context * ctx, ggml_type 
 
 static vk_matmul_pipeline ggml_vk_get_mul_mat_mat_pipeline(ggml_backend_vk_context * ctx, ggml_type src0_type, ggml_type src1_type, ggml_prec prec) {
     VK_LOG_DEBUG("ggml_vk_get_mul_mat_mat_pipeline(" << ggml_type_name(src0_type) << ", " << ggml_type_name(src1_type) << ", " << prec << ")");
+    const bool is_mali_or_adreno =
+        ctx->device->vendor_id == VK_VENDOR_ID_ARM || ctx->device->vendor_id == VK_VENDOR_ID_QUALCOMM;
     if (src0_type == GGML_TYPE_F32 && src1_type == GGML_TYPE_F32) {
+        // Per-context coopmat opt-out: route through the parallel non-coopmat
+        // slot populated alongside the coopmat1 one on Mali/Adreno. Lets
+        // inference contexts skip the coopmat1 shader (which DeviceLosts on
+        // wide bert encoder fused submits) without affecting concurrent
+        // finetune contexts on the same device.
+        if (is_mali_or_adreno && ctx->disable_coopmat && ctx->device->pipeline_matmul_f32_nc) {
+            return ctx->device->pipeline_matmul_f32_nc;
+        }
         // KHR coopmat1 only supports fp16 inputs natively. The _cm1 f32xf32 shader
         // converts inputs to fp16 internally which causes precision loss and timeouts
         // on embedded GPUs like Mali and Adreno. We return nullptr to force a proper dequant to
         // f16 for BOTH inputs before running the f16xf16 coopmat path.
-        if ((ctx->device->vendor_id == VK_VENDOR_ID_ARM || ctx->device->vendor_id == VK_VENDOR_ID_QUALCOMM) && ctx->device->coopmat_support && !ctx->device->coopmat2) {
+        if (is_mali_or_adreno && ctx->device->coopmat_support && !ctx->device->coopmat2) {
             return nullptr;
         }
         return ctx->device->pipeline_matmul_f32;
     }
     if (src0_type == GGML_TYPE_F32 && src1_type == GGML_TYPE_F16) {
+        if (is_mali_or_adreno && ctx->disable_coopmat && ctx->device->pipeline_matmul_f32_f16_nc) {
+            return ctx->device->pipeline_matmul_f32_f16_nc;
+        }
         return ctx->device->pipeline_matmul_f32_f16;
     }
     if (src0_type == GGML_TYPE_BF16 && src1_type == GGML_TYPE_BF16) {
