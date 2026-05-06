@@ -5,19 +5,31 @@
 void load_a_to_shmem(const uint pos_a, const uint row, const uint col, const uint idx_m, const uint block, const uint end_k) {
 #if defined(DATA_A_F32) || defined(DATA_A_F16)
 #if LOAD_VEC_A == 8
-            const uint idx = pos_a + col * p.stride_a / LOAD_VEC_A + row;
             const uint buf_idx = col * SHMEM_STRIDE + row * LOAD_VEC_A / 2;
-            FLOAT_TYPE_VEC8 aa = FLOAT_TYPE_VEC8(data_a[idx]);
-            buf_a[buf_idx    ] = aa[0].xy;
-            buf_a[buf_idx + 1] = aa[0].zw;
-            buf_a[buf_idx + 2] = aa[1].xy;
-            buf_a[buf_idx + 3] = aa[1].zw;
+            if (idx_m < p.M) {
+                const uint idx = pos_a + col * p.stride_a / LOAD_VEC_A + row;
+                FLOAT_TYPE_VEC8 aa = FLOAT_TYPE_VEC8(data_a[idx]);
+                buf_a[buf_idx    ] = aa[0].xy;
+                buf_a[buf_idx + 1] = aa[0].zw;
+                buf_a[buf_idx + 2] = aa[1].xy;
+                buf_a[buf_idx + 3] = aa[1].zw;
+            } else {
+                buf_a[buf_idx    ] = FLOAT_TYPE_VEC2(0.0f);
+                buf_a[buf_idx + 1] = FLOAT_TYPE_VEC2(0.0f);
+                buf_a[buf_idx + 2] = FLOAT_TYPE_VEC2(0.0f);
+                buf_a[buf_idx + 3] = FLOAT_TYPE_VEC2(0.0f);
+            }
 #elif LOAD_VEC_A == 4
-            const uint idx = pos_a + col * p.stride_a / LOAD_VEC_A + row;
             const uint buf_idx = col * SHMEM_STRIDE + row * LOAD_VEC_A / 2;
-            FLOAT_TYPE_VEC4 aa = FLOAT_TYPE_VEC4(data_a[idx]);
-            buf_a[buf_idx    ] = aa.xy;
-            buf_a[buf_idx + 1] = aa.zw;
+            if (idx_m < p.M) {
+                const uint idx = pos_a + col * p.stride_a / LOAD_VEC_A + row;
+                FLOAT_TYPE_VEC4 aa = FLOAT_TYPE_VEC4(data_a[idx]);
+                buf_a[buf_idx    ] = aa.xy;
+                buf_a[buf_idx + 1] = aa.zw;
+            } else {
+                buf_a[buf_idx    ] = FLOAT_TYPE_VEC2(0.0f);
+                buf_a[buf_idx + 1] = FLOAT_TYPE_VEC2(0.0f);
+            }
 #else // LOAD_VEC_BATCH_A == 2
             const uint idx = pos_a + col * p.stride_a + row * 2;
             const uint buf_idx = col * SHMEM_STRIDE + row;
@@ -32,11 +44,16 @@ void load_a_to_shmem(const uint pos_a, const uint row, const uint col, const uin
 #endif
 #elif defined(DATA_A_BF16)
 #if LOAD_VEC_A == 4
-            const uint idx = pos_a + col * p.stride_a / LOAD_VEC_A + row;
             const uint buf_idx = col * SHMEM_STRIDE + row * LOAD_VEC_A / 2;
-            FLOAT_TYPE_VEC4 aa = FLOAT_TYPE_VEC4(TO_FLOAT_TYPE(data_a[idx]));
-            buf_a[buf_idx    ] = aa.xy;
-            buf_a[buf_idx + 1] = aa.zw;
+            if (idx_m < p.M) {
+                const uint idx = pos_a + col * p.stride_a / LOAD_VEC_A + row;
+                FLOAT_TYPE_VEC4 aa = FLOAT_TYPE_VEC4(TO_FLOAT_TYPE(data_a[idx]));
+                buf_a[buf_idx    ] = aa.xy;
+                buf_a[buf_idx + 1] = aa.zw;
+            } else {
+                buf_a[buf_idx    ] = FLOAT_TYPE_VEC2(0.0f);
+                buf_a[buf_idx + 1] = FLOAT_TYPE_VEC2(0.0f);
+            }
 #else // LOAD_VEC_BATCH_A == 2
             const uint idx = pos_a + col * p.stride_a + row * 2;
             const uint buf_idx = col * SHMEM_STRIDE + row;
