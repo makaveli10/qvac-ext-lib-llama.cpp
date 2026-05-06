@@ -204,6 +204,10 @@ extern "C" {
     typedef ggml_backend_buffer_type_t * (*ggml_backend_dev_get_extra_bufts_t)(ggml_backend_dev_t device);
     // Set the abort callback for the backend
     typedef void                         (*ggml_backend_set_abort_callback_t)(ggml_backend_t backend, ggml_abort_callback abort_callback, void * abort_callback_data);
+    // Per-context coopmat opt-out for Vulkan. When disabled, pipeline selection
+    // forces non-coopmat shader paths even on devices that report coopmat
+    // support.
+    typedef void                         (*ggml_backend_vk_set_disable_coopmat_t)(ggml_backend_t backend, bool disable);
     // Get a list of feature flags supported by the backend (returns a NULL-terminated array)
     struct ggml_backend_feature {
         const char * name;

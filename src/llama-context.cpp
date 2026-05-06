@@ -253,6 +253,19 @@ llama_context::llama_context(
                 if (ggml_backend_set_n_threads_fn) {
                     set_n_threads_fns.emplace_back(backend.get(), ggml_backend_set_n_threads_fn);
                 }
+
+                // Per-context coopmat opt-out for Vulkan. Disable coopmat for
+                // inference contexts so they take the non-coopmat shader path
+                // and avoid Mali KHR_coopmat1 corruption.
+                const bool arch_needs_coopmat =
+                    model.arch == LLM_ARCH_QWEN35 || model.arch == LLM_ARCH_QWEN35MOE;
+                const bool disable_coopmat = !cparams.training && !arch_needs_coopmat;
+                auto ggml_backend_vk_set_disable_coopmat_fn =
+                    (ggml_backend_vk_set_disable_coopmat_t) ggml_backend_reg_get_proc_address(
+                        reg, "ggml_backend_vk_set_disable_coopmat");
+                if (ggml_backend_vk_set_disable_coopmat_fn) {
+                    ggml_backend_vk_set_disable_coopmat_fn(backend.get(), disable_coopmat);
+                }
             }
         }
 
@@ -2738,7 +2751,7 @@ void llama_context::opt_epoch_iter(
             }
             ggml_opt_prepare_alloc(opt_ctx, ctx_compute_opt, gf, res->get_inp_tokens(), res->get_logits());
             ggml_opt_alloc(opt_ctx, train);
-            
+
             // Load optimizer tensors on first training iteration if pending
             if (train && should_load_optimizer_tensors && !optimizer_tensors_loaded) {
                 if (ggml_opt_load_tensors(opt_ctx, pending_optimizer_checkpoint_path.c_str())) {

@@ -2024,6 +2024,10 @@ struct ggml_backend_vk_context {
 
     vk_device device;
 
+    // Per-context coopmat opt-out. When true, pipeline selection forces
+    // non-coopmat variants even if device->coopmat_support is true.
+    bool disable_coopmat {false};
+
     size_t semaphore_idx, event_idx;
     ggml_vk_garbage_collector gc;
     size_t prealloc_size_x, prealloc_size_y, prealloc_size_split_k, prealloc_size_add_rms_partials, prealloc_size_add_rms_partials_offset, prealloc_size_tile;
@@ -6202,18 +6206,23 @@ static vk_matmul_pipeline ggml_vk_get_mul_mat_mat_pipeline(ggml_backend_vk_conte
         return ctx->device->pipeline_matmul_bf16;
     }
     if (prec == GGML_PREC_DEFAULT && ctx->device->fp16 && !(ctx->device->coopmat_support && !ctx->device->coopmat_acc_f16_support)) {
+        // On ARM Mali / Adreno with coopmat1: the F16 coopmat1 shaders produce
+        // corrupt output (zeros beyond M=32). When disable_coopmat is set (inference),
+        // route to .f32acc which contains non-coopmat fp32 shaders.
+        // When disable_coopmat is false (training), use the normal coopmat f16acc path.
+        const bool force_mali_fp32acc =
+            (ctx->device->vendor_id == VK_VENDOR_ID_ARM || ctx->device->vendor_id == VK_VENDOR_ID_QUALCOMM) &&
+            !ctx->device->coopmat2 &&
+            ctx->device->coopmat_support &&
+            ctx->disable_coopmat;
         if (src0_type == GGML_TYPE_F16 && src1_type == GGML_TYPE_F32) {
-            // Mali / Adreno KHR_coopmat1: F16 accumulation overflows on wide reductions
-            // (e.g. bert encoder graphs at large batch). Force F32 accumulation.
-            if ((ctx->device->vendor_id == VK_VENDOR_ID_ARM || ctx->device->vendor_id == VK_VENDOR_ID_QUALCOMM) && ctx->device->coopmat_support && !ctx->device->coopmat2) {
+            if (force_mali_fp32acc) {
                 return ctx->device->pipeline_matmul_f16_f32.f32acc;
             }
             return ctx->device->pipeline_matmul_f16_f32.f16acc;
         }
         if (src0_type == GGML_TYPE_F16 && src1_type == GGML_TYPE_F16) {
-            // Mali / Adreno KHR_coopmat1: F16 accumulation overflows on wide reductions
-            // (e.g. bert encoder graphs at large batch). Force F32 accumulation.
-            if ((ctx->device->vendor_id == VK_VENDOR_ID_ARM || ctx->device->vendor_id == VK_VENDOR_ID_QUALCOMM) && ctx->device->coopmat_support && !ctx->device->coopmat2) {
+            if (force_mali_fp32acc) {
                 return ctx->device->pipeline_matmul_f16.f32acc;
             }
             return ctx->device->pipeline_matmul_f16.f16acc;
@@ -7256,7 +7265,8 @@ static vk_pipeline ggml_vk_guess_matmul_pipeline(ggml_backend_vk_context * ctx, 
     }
     if ((ctx->device->vendor_id == VK_VENDOR_ID_ARM || ctx->device->vendor_id == VK_VENDOR_ID_QUALCOMM) && ctx->device->coopmat_support && !ctx->device->coopmat2) {
         if (src0_type == GGML_TYPE_F16) {
-            return aligned ? mmp->a_l : mmp->l;
+            // Use medium tile to avoid TDR (VK_ERROR_DEVICE_LOST) with large tiles on Mali
+            return aligned ? mmp->a_m : mmp->m;
         }
     }
 
@@ -16513,11 +16523,27 @@ static ggml_backend_dev_t ggml_backend_vk_reg_get_device(ggml_backend_reg_t reg,
     return devices[device];
 }
 
+// Per-context coopmat opt-out setter, resolved by name via reg_get_proc_address.
+// See ggml_backend_vk_set_disable_coopmat_t in ggml-backend.h.
+static void ggml_backend_vk_set_disable_coopmat(ggml_backend_t backend, bool disable) {
+    GGML_ASSERT(backend != nullptr);
+    ggml_backend_vk_context * ctx = static_cast<ggml_backend_vk_context *>(backend->context);
+    ctx->disable_coopmat = disable;
+}
+
+static void * ggml_backend_vk_reg_get_proc_address(ggml_backend_reg_t reg, const char * name) {
+    if (strcmp(name, "ggml_backend_vk_set_disable_coopmat") == 0) {
+        return (void *) ggml_backend_vk_set_disable_coopmat;
+    }
+    GGML_UNUSED(reg);
+    return nullptr;
+}
+
 static const struct ggml_backend_reg_i ggml_backend_vk_reg_i = {
     /* .get_name         = */ ggml_backend_vk_reg_get_name,
     /* .get_device_count = */ ggml_backend_vk_reg_get_device_count,
     /* .get_device       = */ ggml_backend_vk_reg_get_device,
-    /* .get_proc_address = */ NULL,
+    /* .get_proc_address = */ ggml_backend_vk_reg_get_proc_address,
 };
 
 ggml_backend_reg_t ggml_backend_vk_reg() {
