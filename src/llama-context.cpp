@@ -265,6 +265,10 @@ llama_context::llama_context(
                         reg, "ggml_backend_vk_set_disable_coopmat");
                 if (ggml_backend_vk_set_disable_coopmat_fn) {
                     ggml_backend_vk_set_disable_coopmat_fn(backend.get(), disable_coopmat);
+                    LLAMA_LOG_INFO("%s: Vulkan backend '%s': coopmat %s (training=%d, arch_needs_coopmat=%d)\n",
+                        __func__, ggml_backend_name(backend.get()),
+                        disable_coopmat ? "DISABLED" : "ENABLED",
+                        (int)cparams.training, (int)arch_needs_coopmat);
                 }
             }
         }
