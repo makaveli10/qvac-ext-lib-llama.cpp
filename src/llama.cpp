@@ -1050,16 +1050,11 @@ static struct llama_model * llama_model_load_from_file_impl(
         if (metadata != nullptr) {
             n_sources_defined++;
         }
-        // TODO: path_model is not used anymore
-        if (true) {
-        // if (!path_model.empty()) {
-            n_sources_defined++;
-        }
         if (file != nullptr) {
             n_sources_defined++;
         }
-        if (n_sources_defined != 1) {
-            LLAMA_LOG_ERROR("%s: exactly one out metadata, path_model, and file must be defined\n", __func__);
+        if (n_sources_defined > 1) {
+            LLAMA_LOG_ERROR("%s: at most one of metadata and file may be defined\n", __func__);
             return nullptr;
         }
     }
