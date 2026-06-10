@@ -133,7 +133,7 @@ static std::vector<llama_device_memory_data> llama_get_device_memory_data(
     }
 
     devs           = model->devices;
-    hp_ngl         = model->hparams.n_layer;
+    hp_ngl         = model->hparams.n_layer();
     hp_n_ctx_train = model->hparams.n_ctx_train;
     hp_n_expert    = model->hparams.n_expert;
 

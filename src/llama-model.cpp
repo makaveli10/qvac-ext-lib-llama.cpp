@@ -1640,7 +1640,7 @@ bool llama_model::create_backend_buffers(std::size_t size_data,
 
 void llama_model::print_backend_buffers_info(const int32_t n_gpu_layers) {
     if (llama_supports_gpu_offload()) {
-        const int n_gpu = std::min(n_gpu_layers, n_layer_all);
+        const int n_gpu = std::min(n_gpu_layers, (int32_t) hparams.n_layer_all);
 
         int n_repeating = n_gpu;
         if (n_repeating > 0) {
@@ -1649,8 +1649,8 @@ void llama_model::print_backend_buffers_info(const int32_t n_gpu_layers) {
         }
         LLAMA_LOG_INFO("%s: offloading %d repeating layers to GPU\n", __func__, n_repeating);
 
-        const int max_backend_supported_layers = n_layer_all + 1;
-        const int max_offloadable_layers       = n_layer_all + 1;
+        const int max_backend_supported_layers = hparams.n_layer_all + 1;
+        const int max_offloadable_layers       = hparams.n_layer_all + 1;
 
         LLAMA_LOG_INFO("%s: offloaded %d/%d layers to GPU\n", __func__, std::min(n_gpu_layers, max_offloadable_layers), max_backend_supported_layers);
     }
