@@ -95,6 +95,84 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
     }
 }
 
+template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_tq2_0(
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+    constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
+    constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback) / warp_size;
+    constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback);
+    constexpr int sram_stride = ggml_cuda_mmq_get_sram_stride(type, J, fallback);
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    int   * x_qs = (int   *)  x_tile;
+    float * x_df = (float *) (x_qs + 2*MMQ_TILE_NE_K);
+#else
+    constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_Q8_0, I);
+    int   * x_qs = (int   *)  x_tile;
+    float * x_df = (float *) (x_qs + txs.qs);
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+
+    // A TQ2_0 block covers QK_K == MMQ_ITER_K values, so exactly one block is loaded per iteration.
+    static_assert(MMQ_ITER_K == QK_K, "TQ2_0 needs exactly one block per MMQ iteration");
+
+    constexpr int threads_per_row = QI_TQ2_0; // one thread per 32 bit word of qs
+    constexpr int nrows           = warp_size / threads_per_row;
+
+    const int kqsx = threadIdx.x % threads_per_row;
+
+#pragma unroll
+    for (int i0 = 0; i0 < I; i0 += nrows*nwarps) {
+        int i = i0 + threadIdx.y*nrows + threadIdx.x/threads_per_row;
+
+        if (fallback) {
+            i = min(i, i_max);
+        }
+
+        const block_tq2_0 * bxi = (const block_tq2_0 *) x + kbx0 + i*stride;
+
+        // sizeof(block_tq2_0) == 66, so qs is only 2 byte aligned across blocks
+        const int qs0 = get_int_b2(bxi->qs, kqsx);
+
+        // word kqsx == QI8_0*h + c holds elements 128*h + 32*l + 4*c + {0..3} of bit plane l,
+        // which the q8_0 vec dot expects at tile word MMQ_TILE_NE_K*h + QI8_0*l + c
+        const int k0 = (kqsx/QI8_0)*MMQ_TILE_NE_K + kqsx%QI8_0;
+
+#pragma unroll
+        for (int l = 0; l < QR_TQ2_0; ++l) {
+            const int q = __vsub4((qs0 >> (2*l)) & 0x03030303, 0x01010101);
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+            x_qs[i*sram_stride           + k0 + l*QI8_0] = q;
+#else
+            x_qs[i*(2*MMQ_TILE_NE_K + 1) + k0 + l*QI8_0] = q;
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+        }
+    }
+
+    // One scale per block, replicated over all QK8_1 sized sub-blocks of the tile.
+    constexpr int blocks_per_tile_x_row = 2*MMQ_TILE_NE_K / QI8_0;
+    constexpr int rows_per_warp         = warp_size / blocks_per_tile_x_row;
+    static_assert(QK_K/QK8_1 == blocks_per_tile_x_row, "wrong number of TQ2_0 scale entries");
+
+    const int kbxd = threadIdx.x % blocks_per_tile_x_row;
+
+#pragma unroll
+    for (int i0 = 0; i0 < I; i0 += nwarps * rows_per_warp) {
+        int i = i0 + threadIdx.y * rows_per_warp + threadIdx.x / blocks_per_tile_x_row;
+
+        if (fallback) {
+            i = min(i, i_max);
+        }
+
+        const block_tq2_0 * bxi = (const block_tq2_0 *) x + kbx0 + i*stride;
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+        x_df[i*sram_stride                           + kbxd] = bxi->d;
+#else
+        x_df[i*(2*MMQ_TILE_NE_K/QI8_0) + i/(QI8_0/2) + kbxd] = bxi->d;
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    }
+}
+
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_0(
         const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();

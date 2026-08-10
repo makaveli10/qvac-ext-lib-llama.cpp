@@ -139,6 +139,10 @@ typedef sycl::half2 ggml_half2;
 #define QI6_K (QK_K / (4*QR6_K))
 #define QR6_K 2
 
+// ternary TQ2_0, not to be confused with QI2_0/QR2_0 above which belong to the 64 element Q2_0
+#define QI_TQ2_0 (QK_K / (4*QR_TQ2_0))
+#define QR_TQ2_0 4
+
 #define QI2_XXS (QK_K / (4*QR2_XXS))
 #define QR2_XXS 4
 
