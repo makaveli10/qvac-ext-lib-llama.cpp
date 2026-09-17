@@ -535,7 +535,12 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
         if (scalar_only && ret.axis >= 0 && ret.axis < GGML_MAX_DIMS) {
             ret = {GGML_BACKEND_SPLIT_AXIS_UNKNOWN, {0}, {1}, 1};
         }
-        GGML_ASSERT(ret.axis != GGML_BACKEND_SPLIT_AXIS_UNKNOWN);
+        if (ret.axis == GGML_BACKEND_SPLIT_AXIS_UNKNOWN) {
+            GGML_ABORT("unsupported split states: node=%s op=%s src0=%s axis=%d src1=%s axis=%d",
+                tensor->name, ggml_op_name(tensor->op),
+                tensor->src[0] ? tensor->src[0]->name : "-", tensor->src[0] ? (int) src_ss[0].axis : -1,
+                tensor->src[1] ? tensor->src[1]->name : "-", tensor->src[1] ? (int) src_ss[1].axis : -1);
+        }
         return ret;
     };
 
@@ -595,8 +600,13 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
         }
         if (src_ss[0].axis == src_ss[1].axis && src_ss[0].axis >= GGML_BACKEND_SPLIT_AXIS_2 &&
                 src_ss[0].axis < GGML_MAX_DIMS) {
-            GGML_ASSERT(split_states_equal(src_ss[0], src_ss[1]));
-            return src_ss[0];
+            // GQA: src0 heads are broadcast over src1 heads, the ratio check after the op switch asserts a proportional split
+            return src_ss[1];
+        }
+        // batched matmul with a single broadcast src0 head and the src1 heads split across devices
+        if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED && src_ss[1].axis >= GGML_BACKEND_SPLIT_AXIS_2 &&
+                src_ss[1].axis < GGML_MAX_DIMS && tensor->src[0]->ne[src_ss[1].axis] == 1) {
+            return src_ss[1];
         }
         // batched matmul with the batches split across devices and a replicated activation
         if (src_ss[0].axis >= GGML_BACKEND_SPLIT_AXIS_2 && src_ss[0].axis < GGML_MAX_DIMS &&
@@ -606,6 +616,39 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
         GGML_ABORT("unsupported mul_mat split states: node=%s src0=%s axis=%d src1=%s axis=%d",
             tensor->name, tensor->src[0]->name, (int) src_ss[0].axis, tensor->src[1]->name, (int) src_ss[1].axis);
         //return {GGML_BACKEND_SPLIT_AXIS_UNKNOWN, {0}, {1}, 1};
+    };
+
+    // repeat_back sums over the repeated dims, a sum over the split axis leaves a partial sum on each device
+    auto handle_repeat_back = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
+        if (src_ss[0].axis >= 0 && src_ss[0].axis < GGML_MAX_DIMS && tensor->ne[src_ss[0].axis] == 1) {
+            return {assume_sync ? GGML_BACKEND_SPLIT_AXIS_MIRRORED : GGML_BACKEND_SPLIT_AXIS_PARTIAL, {0}, {1}, 1};
+        }
+        return handle_generic(src_ss, /*scalar_only =*/ false);
+    };
+
+    // out_prod(a, b) -> [a.ne0, b.ne0, ...] and reduces over dim 1 of both srcs
+    auto handle_out_prod = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
+        if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_0 && src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED) {
+            return src_ss[0];
+        }
+        if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED && src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_0) {
+            ggml_backend_meta_split_state ret = src_ss[1];
+            ret.axis = GGML_BACKEND_SPLIT_AXIS_1;
+            ret.nr[0] = 1;
+            ret.n_segments = 1;
+            return ret;
+        }
+        if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_1 && src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_1) {
+            GGML_ASSERT(split_states_equal(src_ss[0], src_ss[1]));
+            return {assume_sync ? GGML_BACKEND_SPLIT_AXIS_MIRRORED : GGML_BACKEND_SPLIT_AXIS_PARTIAL, {0}, {1}, 1};
+        }
+        // batched with the heads of src0 broadcast over src1, the ratio check after the op switch asserts a proportional split
+        if (src_ss[1].axis >= GGML_BACKEND_SPLIT_AXIS_2 && src_ss[1].axis < GGML_MAX_DIMS &&
+                (src_ss[0].axis == src_ss[1].axis ||
+                (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED && tensor->src[0]->ne[src_ss[1].axis] == 1))) {
+            return src_ss[1];
+        }
+        return handle_generic(src_ss, /*scalar_only =*/ true);
     };
 
     auto handle_reshape = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
@@ -700,6 +743,14 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
         if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED || src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_PARTIAL) {
             return src_ss[0];
         }
+        // GQA reduce in the backward pass: the heads on dim 2 are viewed as [n_head_kv, n_head/n_head_kv] on dims 2 and 3
+        if (axis == GGML_BACKEND_SPLIT_AXIS_2 && tensor->view_offs == tensor->src[0]->view_offs &&
+                tensor->ne[0] == tensor->src[0]->ne[0] && tensor->ne[1] == tensor->src[0]->ne[1] &&
+                tensor->ne[2]*tensor->ne[3] == tensor->src[0]->ne[2] && tensor->src[0]->ne[3] == 1 &&
+                tensor->nb[1] == tensor->src[0]->nb[1] && tensor->nb[3] == tensor->src[0]->nb[2] &&
+                tensor->nb[2] == tensor->src[0]->nb[2]*tensor->ne[3]) {
+            return {GGML_BACKEND_SPLIT_AXIS_2, {0}, {1}, 1};
+        }
         GGML_ABORT("view of permuted tensor not implemented");
         //return {GGML_BACKEND_SPLIT_AXIS_UNKNOWN, {0}, {1}, 1};
     };
@@ -767,6 +818,35 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
         if (src_ss[0].axis >= 0 && src_ss[0].axis < GGML_MAX_DIMS) {
             GGML_ASSERT(tensor->op_params[2*src_ss[0].axis + 0] == 0);
             GGML_ASSERT(tensor->op_params[2*src_ss[0].axis + 1] == 0);
+        }
+        return src_ss[0];
+    };
+
+    // the last src holds the optimizer hyperparameters, all other srcs have the shape of the parameter tensor
+    auto handle_opt_step = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
+        for (size_t i = 1; i < GGML_MAX_SRC && tensor->src[i] != nullptr; i++) {
+            if (i + 1 == GGML_MAX_SRC || tensor->src[i + 1] == nullptr) {
+                GGML_ASSERT(src_ss[i].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED);
+            } else {
+                GGML_ASSERT(split_states_equal(src_ss[i], src_ss[0]));
+            }
+        }
+        return src_ss[0];
+    };
+
+    auto handle_soft_max = [&](const std::vector<ggml_backend_meta_split_state> & src_ss) -> ggml_backend_meta_split_state {
+        GGML_ASSERT(src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0);
+        if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED) {
+            return handle_generic(src_ss, /*scalar_only =*/ false);
+        }
+        // the mask is broadcast along the split axis
+        GGML_ASSERT(tensor->src[1] == nullptr ||
+            (src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED && tensor->src[1]->ne[src_ss[0].axis] == 1));
+        if (src_ss[0].axis == GGML_BACKEND_SPLIT_AXIS_2) {
+            GGML_ASSERT(ggml_get_op_params_f32(tensor, 1) == 0.0f); // ALiBi slopes need the global head index
+            GGML_ASSERT(tensor->src[2] == nullptr || src_ss[2].axis == GGML_BACKEND_SPLIT_AXIS_0);
+        } else {
+            GGML_ASSERT(tensor->src[2] == nullptr || src_ss[2].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED);
         }
         return src_ss[0];
     };
@@ -907,9 +987,11 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
             case GGML_OP_COUNT_EQUAL: {
                 split_state = handle_per_row(src_ss);
             } break;
-            case GGML_OP_REPEAT:
-            case GGML_OP_REPEAT_BACK: {
+            case GGML_OP_REPEAT: {
                 split_state = handle_generic(src_ss, /*scalar_only =*/ false);
+            } break;
+            case GGML_OP_REPEAT_BACK: {
+                split_state = handle_repeat_back(src_ss);
             } break;
             case GGML_OP_CONCAT: {
                 split_state = handle_concat(src_ss);
@@ -930,7 +1012,7 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
                 split_state = handle_mul_mat(src_ss);
             } break;
             case GGML_OP_OUT_PROD: {
-                split_state = handle_generic(src_ss, /*scalar_only =*/ true);
+                split_state = handle_out_prod(src_ss);
             } break;
             case GGML_OP_SCALE: {
                 split_state = handle_generic(src_ss, /*scalar_only =*/ false);
@@ -968,7 +1050,9 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
             case GGML_OP_DIAG_MASK_ZERO: {
                 split_state = handle_generic(src_ss, /*scalar_only =*/ true);
             } break;
-            case GGML_OP_SOFT_MAX:
+            case GGML_OP_SOFT_MAX: {
+                split_state = handle_soft_max(src_ss);
+            } break;
             case GGML_OP_SOFT_MAX_BACK: {
                 split_state = handle_generic(src_ss, /*scalar_only =*/ false);
             } break;
@@ -1062,7 +1146,9 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
                 split_state = handle_per_row(src_ss);
             } break;
             case GGML_OP_OPT_STEP_ADAMW:
-            case GGML_OP_OPT_STEP_SGD:
+            case GGML_OP_OPT_STEP_SGD: {
+                split_state = handle_opt_step(src_ss);
+            } break;
             case GGML_OP_GLU: {
                 split_state = handle_generic(src_ss, /*scalar_only =*/ false);
             } break;

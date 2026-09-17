@@ -190,6 +190,10 @@ bool llama_lora_allocate_buffers(
     // host-accessible CPU buffer — the scheduler handles cross-backend
     // copies for forward/backward passes automatically.
     ggml_backend_buffer_type_t buft = ggml_backend_cpu_buffer_type();
+    if (model->split_mode() == LLAMA_SPLIT_MODE_TENSOR) {
+        // the meta device splits the LoRA factors like the base weights, a CPU copy would be mirrored on every device
+        buft = ggml_backend_dev_buffer_type(model->devices[0].dev);
+    }
 
     if (adapter->ctxs.empty()) {
         LLAMA_LOG_ERROR("No contexts found in adapter\n");

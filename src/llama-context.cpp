@@ -3989,15 +3989,9 @@ llama_context * llama_init_from_model(
         params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
     }
 
-    if (model->split_mode() == LLAMA_SPLIT_MODE_TENSOR) {
-        if (params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_AUTO) {
-            LLAMA_LOG_INFO("%s: enabling flash_attn since it is required for SPLIT_MODE_TENSOR\n", __func__);
-            params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
-        }
-        if (params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_ENABLED) {
-            LLAMA_LOG_ERROR("%s: SPLIT_MODE_TENSOR requires flash_attn to be enabled\n", __func__);
-            return nullptr;
-        }
+    if (model->split_mode() == LLAMA_SPLIT_MODE_TENSOR && params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_AUTO) {
+        LLAMA_LOG_INFO("%s: enabling flash_attn for SPLIT_MODE_TENSOR\n", __func__);
+        params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
     }
 
     if ((model->hparams.is_mla() || model->arch == LLM_ARCH_DEEPSEEK4) && params.type_k != params.type_v) {

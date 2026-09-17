@@ -367,7 +367,33 @@ llama_model * llama_model_create(llama_model_loader & ml, const llama_model_para
 struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const struct ggml_tensor * tensor, void * userdata) {
     const llama_meta_device_get_split_state_userdata * ud = (const llama_meta_device_get_split_state_userdata *) userdata;
     const llama_hparams & hparams = ud->model->hparams;
-    const std::string tensor_name = tensor->name;
+    std::string tensor_name = tensor->name;
+
+    // optimizer state tensors follow the split of their parameter tensor
+    static const char * const opt_prefixes[] = {"grad acc for ", "AdamW m for ", "AdamW v for "};
+    for (const char * prefix : opt_prefixes) {
+        const size_t n = strlen(prefix);
+        if (tensor_name.compare(0, n, prefix) == 0) {
+            tensor_name = tensor_name.substr(n);
+            break;
+        }
+    }
+
+    // LoRA factors follow the split of their base tensor: a shares the input dim, b shares the output dim
+    static const char * const lora_suffixes[] = {".lora_a", ".lora_b"};
+    for (const char * suffix : lora_suffixes) {
+        const size_t n = strlen(suffix);
+        if (tensor_name.size() > n && tensor_name.compare(tensor_name.size() - n, n, suffix) == 0) {
+            const ggml_tensor * base = ud->model->get_tensor(tensor_name.substr(0, tensor_name.size() - n).c_str());
+            GGML_ASSERT(base != nullptr);
+            const ggml_backend_meta_split_state base_split_state = llama_meta_device_get_split_state(base, userdata);
+            const bool is_a = suffix[n - 1] == 'a';
+            if ((is_a && base_split_state.axis == GGML_BACKEND_SPLIT_AXIS_0) || (!is_a && base_split_state.axis == GGML_BACKEND_SPLIT_AXIS_1)) {
+                return base_split_state;
+            }
+            return {GGML_BACKEND_SPLIT_AXIS_MIRRORED, {0}, {1}, 1};
+        }
+    }
     const bool is_dsv4 = ud->model->arch == LLM_ARCH_DEEPSEEK4 ||
         (ud->model->arch == LLM_ARCH_DFLASH && hparams.dsv4_hc_mult > 0);
 
@@ -580,7 +606,8 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
 
         // output
         if (std::regex_match(tensor_name, pattern_output_weight)) {
-            if (is_dsv4) {
+            // the loss needs full logit rows, so the output projection stays mirrored when training
+            if (is_dsv4 || ud->model->training()) {
                 return get_tensor_config_impl(GGML_BACKEND_SPLIT_AXIS_MIRRORED);
             }
             return get_tensor_config_impl(GGML_BACKEND_SPLIT_AXIS_1);
@@ -588,6 +615,9 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
         if (std::regex_match(tensor_name, pattern_output_bias)) {
             const ggml_tensor * output_weight = ud->model->get_tensor("output.weight");
             GGML_ASSERT(output_weight != nullptr);
+            if (ud->model->training()) {
+                return get_tensor_config_impl(GGML_BACKEND_SPLIT_AXIS_MIRRORED);
+            }
             return get_tensor_config_impl(GGML_BACKEND_SPLIT_AXIS_0);
         }
 
@@ -2004,6 +2034,10 @@ llama_split_mode llama_model::split_mode() const {
     return params.split_mode;
 }
 
+bool llama_model::training() const {
+    return params.training;
+}
+
 std::map<ggml_backend_buffer_type_t, size_t> llama_model::memory_breakdown() const {
     std::map<ggml_backend_buffer_type_t, size_t> ret;
     for (const auto & [ctx, bufs] : pimpl->ctxs_bufs) {
@@ -2346,6 +2380,9 @@ ggml_tensor * llama_model::get_rope_factors(const llama_cparams & cparams, int i
 llama_memory_i * llama_model::create_memory(const llama_memory_params & params, const llama_cparams & cparams) const {
     llama_memory_i * res;
 
+    // the transposed V cache writes single elements with global row indices, this does not split across devices
+    const bool v_trans = !cparams.flash_attn && split_mode() != LLAMA_SPLIT_MODE_TENSOR;
+
     switch (arch) {
         // Models that need specific instantiation should be handled in the
         // switch statement
@@ -2376,7 +2413,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                         *this,
                         params.type_k,
                         params.type_v,
-                        !cparams.flash_attn,
+                        v_trans,
                         cparams.offload_kqv,
                         cparams.kv_unified,
                         cparams.n_ctx_seq,
@@ -2403,7 +2440,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             hparams,
                             params.type_k,
                             params.type_v,
-                            !cparams.flash_attn,
+                            v_trans,
                             cparams.offload_kqv,
                             cparams.kv_unified,
                             cparams.n_ctx_seq,
@@ -2428,7 +2465,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             *this,
                             params.type_k,
                             params.type_v,
-                            !cparams.flash_attn,
+                            v_trans,
                             cparams.offload_kqv,
                             cparams.kv_unified,
                             cparams.n_ctx_seq,
@@ -2455,7 +2492,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             hparams,
                             params.type_k,
                             params.type_v,
-                            !cparams.flash_attn,
+                            v_trans,
                             cparams.offload_kqv,
                             cparams.kv_unified,
                             cparams.n_ctx_seq,
@@ -2479,7 +2516,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             *this,
                             params.type_k,
                             params.type_v,
-                            !cparams.flash_attn,
+                            v_trans,
                             cparams.offload_kqv,
                             params.swa_full,
                             cparams.kv_unified,
@@ -2505,7 +2542,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             *this,
                             params.type_k,
                             params.type_v,
-                            !cparams.flash_attn,
+                            v_trans,
                             cparams.offload_kqv,
                             params.swa_full,
                             cparams.kv_unified,
@@ -2522,7 +2559,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             *this,
                             params.type_k,
                             params.type_v,
-                            !cparams.flash_attn,
+                            v_trans,
                             cparams.offload_kqv,
                             params.swa_full,
                             cparams.kv_unified,
@@ -2545,7 +2582,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             *this,
                             params.type_k,
                             params.type_v,
-                            !cparams.flash_attn,
+                            v_trans,
                             cparams.offload_kqv,
                             params.swa_full,
                             cparams.kv_unified,
@@ -2625,7 +2662,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             /* model             */ *this,
                             /* attn_type_k       */ params.type_k,
                             /* attn_type_v       */ params.type_v,
-                            /* attn_v_trans      */ !cparams.flash_attn,
+                            /* attn_v_trans      */ v_trans,
                             /* attn_swa_full     */ params.swa_full,
                             /* attn_kv_size      */ cparams.n_ctx_seq,
                             /* attn_n_ubatch     */ cparams.n_ubatch,
@@ -2645,7 +2682,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             /* model             */ *this,
                             /* attn_type_k       */ params.type_k,
                             /* attn_type_v       */ params.type_v,
-                            /* attn_v_trans      */ !cparams.flash_attn,
+                            /* attn_v_trans      */ v_trans,
                             /* attn_kv_size      */ cparams.n_ctx_seq,
                             /* attn_n_pad        */ 1,
                             /* attn_n_swa        */ hparams.n_swa,
@@ -2665,7 +2702,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             /* model             */ *this,
                             /* attn_type_k       */ params.type_k,
                             /* attn_type_v       */ params.type_v,
-                            /* attn_v_trans      */ !cparams.flash_attn,
+                            /* attn_v_trans      */ v_trans,
                             /* attn_kv_size      */ cparams.n_ctx_seq,
                             /* attn_n_pad        */ 1,
                             /* attn_n_swa        */ hparams.n_swa,
@@ -2731,7 +2768,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                                     *this,
                                     params.type_k,
                                     params.type_v,
-                                    !cparams.flash_attn,
+                                    v_trans,
                                     cparams.offload_kqv,
                                     params.swa_full,
                                     cparams.kv_unified,
@@ -2748,7 +2785,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                                     *this,
                                     params.type_k,
                                     params.type_v,
-                                    !cparams.flash_attn,
+                                    v_trans,
                                     cparams.offload_kqv,
                                     params.swa_full,
                                     cparams.kv_unified,
@@ -2769,7 +2806,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                                 hparams,
                                 params.type_k,
                                 params.type_v,
-                                !cparams.flash_attn,
+                                v_trans,
                                 cparams.offload_kqv,
                                 cparams.kv_unified,
                                 cparams.n_ctx_seq,
@@ -2841,6 +2878,7 @@ llama_model_params llama_model_default_params() {
         /*.no_host                     =*/ false,
         /*.no_alloc                    =*/ false,
         /*.load_mtp                    =*/ false,
+        /*.training                    =*/ false,
     };
 
     return result;
