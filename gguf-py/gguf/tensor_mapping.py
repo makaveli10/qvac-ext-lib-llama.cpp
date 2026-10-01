@@ -1166,10 +1166,12 @@ class TensorNameMap:
 
         MODEL_TENSOR.ATTN_SUB_NORM: (
             "model.layers.{bid}.self_attn.inner_attn_ln",  # bitnet
+            "model.layers.{bid}.self_attn.attn_sub_norm",  # microsoft-bitnet
         ),
 
         MODEL_TENSOR.FFN_SUB_NORM: (
             "model.layers.{bid}.mlp.ffn_layernorm",  # bitnet
+            "model.layers.{bid}.mlp.ffn_sub_norm",   # microsoft-bitnet
         ),
 
         MODEL_TENSOR.DEC_ATTN_NORM: (
@@ -1319,6 +1321,14 @@ class TensorNameMap:
             "model.layers.{bid}.self_attn.indexer.wq_b", # DSA
         ),
 
+        MODEL_TENSOR.INDEXER_KPOOL_GATE: (
+            "model.layers.{bid}.self_attn.indexer.index_kpool_compress_gate", # glm5-next
+        ),
+
+        MODEL_TENSOR.INDEXER_KPOOL_APE: (
+            "model.layers.{bid}.self_attn.indexer.index_kpool_compress_ape", # glm5-next
+        ),
+
         MODEL_TENSOR.INDEXER_Q_PROJ: (
             "model.layers.{bid}.self_attn.index_q_proj", # MSA
         ),
@@ -1333,26 +1343,32 @@ class TensorNameMap:
 
         MODEL_TENSOR.HC_ATTN_FN: (
             "model.layers.{bid}.hc_attn_layer.hc_pre.hc_fn", # hy-v4
+            "model.layers.{bid}.hc_attn_fn",                 # glm5-next
         ),
 
         MODEL_TENSOR.HC_ATTN_BASE: (
             "model.layers.{bid}.hc_attn_layer.hc_pre.hc_base", # hy-v4
+            "model.layers.{bid}.hc_attn_base",                 # glm5-next
         ),
 
         MODEL_TENSOR.HC_ATTN_SCALE: (
             "model.layers.{bid}.hc_attn_layer.hc_pre.hc_scale", # hy-v4
+            "model.layers.{bid}.hc_attn_scale",                 # glm5-next
         ),
 
         MODEL_TENSOR.HC_FFN_FN: (
             "model.layers.{bid}.hc_mlp_layer.hc_pre.hc_fn", # hy-v4
+            "model.layers.{bid}.hc_ffn_fn",                 # glm5-next
         ),
 
         MODEL_TENSOR.HC_FFN_BASE: (
             "model.layers.{bid}.hc_mlp_layer.hc_pre.hc_base", # hy-v4
+            "model.layers.{bid}.hc_ffn_base",                 # glm5-next
         ),
 
         MODEL_TENSOR.HC_FFN_SCALE: (
             "model.layers.{bid}.hc_mlp_layer.hc_pre.hc_scale", # hy-v4
+            "model.layers.{bid}.hc_ffn_scale",                 # glm5-next
         ),
 
         MODEL_TENSOR.HC_HEAD_FN: (
